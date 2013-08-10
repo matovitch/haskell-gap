@@ -1,0 +1,1805 @@
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="Producer" content="MiKTeX pdfTeX-1.40.12">
+<meta name="Creator" content="TeX">
+<meta name="CreationDate" content="D:20130731220139-07'00'">
+<meta name="ModDate" content="D:20130731220139-07'00'">
+<meta name="Fullbanner" content="This is MiKTeX-pdfTeX 2.9.4307 (1.40.12)">
+<title>Measuring the Haskell Gap</title>
+
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:246;left:367"><nobr>DRAFT - Not for redistribution</nobr></div>
+</span></font>
+<font size="4" face="Times"><span style="font-size:24px;font-family:Times">
+<div style="position:absolute;top:293;left:296"><nobr>Measuring the Haskell Gap</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:14px;font-family:Times">
+<div style="position:absolute;top:355;left:249"><nobr>Leaf Petersen</nobr></div>
+<div style="position:absolute;top:355;left:367"><nobr>Todd A. Anderson</nobr></div>
+<div style="position:absolute;top:355;left:517"><nobr>Hai Liu</nobr></div>
+<div style="position:absolute;top:355;left:595"><nobr>Neal Glew</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:379;left:431"><nobr>Intel Labs</nobr></div>
+<div style="position:absolute;top:396;left:268"><nobr>{leaf.petersen,todd.a.anderson,hai.liu}@intel.com, aglew@acm.org</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:14px;font-family:Times">
+<div style="position:absolute;top:482;left:81"><nobr>Abstract</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:505;left:81"><nobr>Papers on functional language implementations frequently set the</nobr></div>
+<div style="position:absolute;top:520;left:81"><nobr>goal of achieving performance “comparable to C”, and sometimes</nobr></div>
+<div style="position:absolute;top:535;left:81"><nobr>report results comparing benchmark results to concrete C imple-</nobr></div>
+<div style="position:absolute;top:550;left:81"><nobr>mentations of the same problem. A key pair of questions for such</nobr></div>
+<div style="position:absolute;top:565;left:81"><nobr>comparisons is: what C program to compare to, and what C com-</nobr></div>
+<div style="position:absolute;top:580;left:81"><nobr>piler to compare with? In a 2012 paper, Satish et al [9] compare</nobr></div>
+<div style="position:absolute;top:595;left:81"><nobr>naive serial C implementations of a range of throughput-oriented</nobr></div>
+<div style="position:absolute;top:610;left:81"><nobr>benchmarks to best-optimized implementations parallelized on a</nobr></div>
+<div style="position:absolute;top:625;left:81"><nobr>six-core machine and demonstrate an average 23× (up to 53×)</nobr></div>
+<div style="position:absolute;top:639;left:81"><nobr>speedup. Further, they demonstrate that most of this so-called</nobr></div>
+<div style="position:absolute;top:654;left:81"><nobr>“Ninja-gap” between naive C and best-optimized code can be elim-</nobr></div>
+<div style="position:absolute;top:669;left:81"><nobr>inated using relatively straightforward C programming techniques.</nobr></div>
+<div style="position:absolute;top:684;left:81"><nobr>Even accounting for thread parallel speedup, these results demon-</nobr></div>
+<div style="position:absolute;top:699;left:81"><nobr>strate a substantial performance gap between naive and tuned C</nobr></div>
+<div style="position:absolute;top:714;left:81"><nobr>code. In this paper we choose a subset of the benchmarks studied</nobr></div>
+<div style="position:absolute;top:729;left:81"><nobr>by Satish et al to port to Haskell. We measure performance of these</nobr></div>
+<div style="position:absolute;top:744;left:81"><nobr>Haskell benchmarks compiled with the standard Glasgow Haskell</nobr></div>
+<div style="position:absolute;top:759;left:81"><nobr>Compiler and with our experimental Intel Labs Haskell Research</nobr></div>
+<div style="position:absolute;top:774;left:81"><nobr>Compiler and report results as compared to our best reconstruc-</nobr></div>
+<div style="position:absolute;top:789;left:81"><nobr>tions of the algorithms used by Satish et al. Results are reported as</nobr></div>
+<div style="position:absolute;top:804;left:81"><nobr>measured both on an Intel Xeon E5-4650 32-core machine, and on</nobr></div>
+<div style="position:absolute;top:819;left:81"><nobr>an Intel Xeon Phi co-processor. We hope that this study provides</nobr></div>
+<div style="position:absolute;top:834;left:81"><nobr>valuable data on the concrete performance of Haskell relative to</nobr></div>
+<div style="position:absolute;top:849;left:81"><nobr>C.</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:14px;font-family:Times">
+<div style="position:absolute;top:880;left:81"><nobr>1. Introduction</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:903;left:81"><nobr>It is often claimed that high-level languages provide greater pro-</nobr></div>
+<div style="position:absolute;top:918;left:81"><nobr>grammer productivity at the expense of some performance; func-</nobr></div>
+<div style="position:absolute;top:933;left:81"><nobr>tional languages have been touted as providing reasonable parallel-</nobr></div>
+<div style="position:absolute;top:948;left:81"><nobr>scalability without huge programmer effort at the loss of some se-</nobr></div>
+<div style="position:absolute;top:963;left:81"><nobr>quential performance. Assessing these claims in general is difficult:</nobr></div>
+<div style="position:absolute;top:978;left:81"><nobr>instead, in this paper we provide a careful study of six benchmarks</nobr></div>
+<div style="position:absolute;top:993;left:81"><nobr>in Haskell reporting the sequential, parallel, and SIMD-vector per-</nobr></div>
+<div style="position:absolute;top:1008;left:81"><nobr>formance in comparison to C.</nobr></div>
+<div style="position:absolute;top:1023;left:99"><nobr>We use C, as is often done in the literature, to represent what</nobr></div>
+<div style="position:absolute;top:1038;left:81"><nobr>is possible with low-level high-performance languages. But this</nobr></div>
+<div style="position:absolute;top:1053;left:81"><nobr>choice immediately raises the question “What C?”. In particular,</nobr></div>
+<div style="position:absolute;top:1068;left:81"><nobr>how much programmer optimization is to be applied to the C pro-</nobr></div>
+<div style="position:absolute;top:1082;left:81"><nobr>gram? And what compiler should the C code be compiled with?</nobr></div>
+<div style="position:absolute;top:1097;left:81"><nobr>These concerns may seem minor, but they are not. In a 2012 pa-</nobr></div>
+<div style="position:absolute;top:1112;left:81"><nobr>per [9] (henceforth “the ninja gap paper”), Satish et al study a range</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:1251;left:81"><nobr>[Copyright notice will appear here once ’preprint’ option is removed.]</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:484;left:476"><nobr>of throughput oriented benchmarks and demonstrate dramatic per-</nobr></div>
+<div style="position:absolute;top:499;left:476"><nobr>formance differences between naive implementations and the best</nobr></div>
+<div style="position:absolute;top:514;left:476"><nobr>known hand-tuned implementations (an average of 23× speedup</nobr></div>
+<div style="position:absolute;top:529;left:476"><nobr>and up to 53×). Moreover, they show that performance comparable</nobr></div>
+<div style="position:absolute;top:544;left:476"><nobr>to the best-in-class implementations can generally be achieved us-</nobr></div>
+<div style="position:absolute;top:559;left:476"><nobr>ing relatively-straightforward language-level optimizations applied</nobr></div>
+<div style="position:absolute;top:574;left:476"><nobr>to the naive versions, combined with appropriate use of a good C</nobr></div>
+<div style="position:absolute;top:589;left:476"><nobr>compiler. These results suggest that the question “What C” is in</nobr></div>
+<div style="position:absolute;top:604;left:476"><nobr>fact critical to any such comparison.</nobr></div>
+<div style="position:absolute;top:619;left:493"><nobr>We attempt to provide a very careful analysis of the relative</nobr></div>
+<div style="position:absolute;top:634;left:476"><nobr>performance of C and Haskell on six of these benchmarks, using</nobr></div>
+<div style="position:absolute;top:648;left:476"><nobr>both the standard Glasgow Haskell Compiler (GHC) and our ex-</nobr></div>
+<div style="position:absolute;top:663;left:476"><nobr>perimental whole-program optimizing Haskell compiler, the Intel</nobr></div>
+<div style="position:absolute;top:678;left:476"><nobr>Labs Haskell Research Compiler (HRC). We do not claim that this</nobr></div>
+<div style="position:absolute;top:693;left:476"><nobr>analysis is the definitive study, nor that this analysis is the only</nobr></div>
+<div style="position:absolute;top:708;left:476"><nobr>way to do such a study. It is possible that better C programmers</nobr></div>
+<div style="position:absolute;top:723;left:476"><nobr>could improve on our reconstructions of the C benchmarks, and it</nobr></div>
+<div style="position:absolute;top:738;left:476"><nobr>is possible that better Haskell programmers could improve on our</nobr></div>
+<div style="position:absolute;top:753;left:476"><nobr>versions of the Haskell benchmarks. We have had to make choices</nobr></div>
+<div style="position:absolute;top:768;left:476"><nobr>as to how far outside of the space of idiomatic Haskell programs to</nobr></div>
+<div style="position:absolute;top:783;left:476"><nobr>go, and to what extent to use unsafe, non-standard, or experimental</nobr></div>
+<div style="position:absolute;top:798;left:476"><nobr>constructs (such as strictness annotations, explicit strictness (seq),</nobr></div>
+<div style="position:absolute;top:813;left:476"><nobr>unboxed vectors, and unsafe array subscripting). And of course, our</nobr></div>
+<div style="position:absolute;top:828;left:476"><nobr>resources for exploring these spaces are finite. Our goal then is not</nobr></div>
+<div style="position:absolute;top:843;left:476"><nobr>to be definitive, but to be transparent.</nobr></div>
+<div style="position:absolute;top:858;left:493"><nobr>We believe that our results provide insights into Haskell perfor-</nobr></div>
+<div style="position:absolute;top:873;left:476"><nobr>mance. We show that Haskell can sometimes achieve performance</nobr></div>
+<div style="position:absolute;top:888;left:476"><nobr>comparable to best-in-class C, that Haskell can often achieve good</nobr></div>
+<div style="position:absolute;top:903;left:476"><nobr>parallel scalability with little programmer effort, and that Haskell</nobr></div>
+<div style="position:absolute;top:917;left:476"><nobr>can benefit from SIMD vectorization on some benchmarks. How-</nobr></div>
+<div style="position:absolute;top:932;left:476"><nobr>ever, we also observe that Haskell performs badly on many bench-</nobr></div>
+<div style="position:absolute;top:947;left:476"><nobr>marks, and that good scalability is not enough to make up for poor</nobr></div>
+<div style="position:absolute;top:962;left:476"><nobr>sequential performance. Specifically, we observe that compiled</nobr></div>
+<div style="position:absolute;top:977;left:476"><nobr>with GHC and run on a 32 core machine, our selected benchmarks</nobr></div>
+<div style="position:absolute;top:992;left:476"><nobr>run between 4.5× and 271× slower (peak performance) than the</nobr></div>
+<div style="position:absolute;top:1007;left:476"><nobr>best performing implementations. We call this gap the Haskell</nobr></div>
+<div style="position:absolute;top:1022;left:476"><nobr>Gap. We show that compiling with HRC reduces the Haskell Gap</nobr></div>
+<div style="position:absolute;top:1037;left:476"><nobr>to between 1.4× and 15.4×. We also give measurements on a</nobr></div>
+<div style="position:absolute;top:1052;left:476"><nobr>pre-production Intel Xeon Phi board, demonstrating a measured</nobr></div>
+<div style="position:absolute;top:1067;left:476"><nobr>Haskell Gap with HRC compiled code of between .88× and 9.52×</nobr></div>
+<div style="position:absolute;top:1082;left:476"><nobr>of our best C versions. To the best of our knowledge, these are the</nobr></div>
+<div style="position:absolute;top:1097;left:476"><nobr>first performance results for Haskell on the Xeon Phi processor.</nobr></div>
+<div style="position:absolute;top:1126;left:476"><nobr>1.1 Methodology: C</nobr></div>
+<div style="position:absolute;top:1147;left:476"><nobr>We are grateful to the authors of the ninja gap paper for graciously</nobr></div>
+<div style="position:absolute;top:1162;left:476"><nobr>providing us with access to archived versions of their C implemen-</nobr></div>
+<div style="position:absolute;top:1176;left:476"><nobr>tations, and for answering our questions in our attempts to repro-</nobr></div>
+<div style="position:absolute;top:1191;left:476"><nobr>duce their results. It is important to make clear that this cannot</nobr></div>
+<div style="position:absolute;top:1206;left:476"><nobr>be considered a full reproduction of their work. Architectures and</nobr></div>
+<div style="position:absolute;top:1221;left:476"><nobr>compilers have changed significantly since the original code was</nobr></div>
+<div style="position:absolute;top:1236;left:476"><nobr>written. New issues (such as, very notably, non-uniform memory-</nobr></div>
+<div style="position:absolute;top:1251;left:476"><nobr>access) arise on the larger and newer machines which we are target-</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:1298;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:1298;left:445"><nobr>1</nobr></div>
+<div style="position:absolute;top:1298;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:1363;left:0"><hr></div><font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:1474;left:81"><nobr>ing. These are issues which the original code was not designed to</nobr></div>
+<div style="position:absolute;top:1489;left:81"><nobr>address, and which we lack the expertise and time to address our-</nobr></div>
+<div style="position:absolute;top:1504;left:81"><nobr>selves. As we will discuss further in Section 2, in places compiler</nobr></div>
+<div style="position:absolute;top:1519;left:81"><nobr>technology has substantially narrowed the gap between naive and</nobr></div>
+<div style="position:absolute;top:1534;left:81"><nobr>optimized algorithms. We have also, for various reasons including</nobr></div>
+<div style="position:absolute;top:1549;left:81"><nobr>the need to run on Microsoft Windows, needed to modify some of</nobr></div>
+<div style="position:absolute;top:1564;left:81"><nobr>their original C code. Any mistakes, anomalies or inconsistencies</nobr></div>
+<div style="position:absolute;top:1578;left:81"><nobr>with the original work are most likely due to us.</nobr></div>
+<div style="position:absolute;top:1606;left:81"><nobr>1.2 Methodology: Floating Point</nobr></div>
+<div style="position:absolute;top:1628;left:81"><nobr>Floating point semantics are a notoriously difficult issue. Floating</nobr></div>
+<div style="position:absolute;top:1642;left:81"><nobr>point arithmetic is generally not associative, and many identities</nobr></div>
+<div style="position:absolute;top:1657;left:81"><nobr>which hold over the real numbers do hold for floating point num-</nobr></div>
+<div style="position:absolute;top:1672;left:81"><nobr>bers in the sense that they may change the precision of the result.</nobr></div>
+<div style="position:absolute;top:1687;left:81"><nobr>Whether this matters is very application dependent. For certain nu-</nobr></div>
+<div style="position:absolute;top:1702;left:81"><nobr>meric applications in which numeric stability is a critical property</nobr></div>
+<div style="position:absolute;top:1717;left:81"><nobr>of algorithms, predictable rounding semantics may be critical. On</nobr></div>
+<div style="position:absolute;top:1732;left:81"><nobr>the other hand, in many graphics applications performance is criti-</nobr></div>
+<div style="position:absolute;top:1747;left:81"><nobr>cal and details of rounding is more or less irrelevant. For our mea-</nobr></div>
+<div style="position:absolute;top:1762;left:81"><nobr>surements, we have chosen to give the compilers maximal freedom</nobr></div>
+<div style="position:absolute;top:1777;left:81"><nobr>to optimize floating point operations (the methodology used in the</nobr></div>
+<div style="position:absolute;top:1792;left:81"><nobr>original ninja gap paper). Other choices are reasonable. We discuss</nobr></div>
+<div style="position:absolute;top:1807;left:81"><nobr>this further in Section 2.</nobr></div>
+<div style="position:absolute;top:1835;left:81"><nobr>1.3 Methodology: Haskell</nobr></div>
+<div style="position:absolute;top:1856;left:81"><nobr>Porting of the Haskell benchmarks was done by three of the au-</nobr></div>
+<div style="position:absolute;top:1871;left:81"><nobr>thors, one of whom is a very experienced Haskell programmer, one</nobr></div>
+<div style="position:absolute;top:1886;left:81"><nobr>of whom is very experienced with functional languages but less so</nobr></div>
+<div style="position:absolute;top:1901;left:81"><nobr>with Haskell, and one of whom is a relative novice to functional</nobr></div>
+<div style="position:absolute;top:1916;left:81"><nobr>programming. In all cases, mutual assistance in writing and tuning</nobr></div>
+<div style="position:absolute;top:1931;left:81"><nobr>the benchmarks was provided. A broad goal of the porting effort</nobr></div>
+<div style="position:absolute;top:1946;left:81"><nobr>was to remain more or less in the space of reasonably idiomatic</nobr></div>
+<div style="position:absolute;top:1961;left:81"><nobr>Haskell. It is likely possible to achieve better performance on some</nobr></div>
+<div style="position:absolute;top:1976;left:81"><nobr>of these benchmarks by essentially writing the C code in Haskell</nobr></div>
+<div style="position:absolute;top:1990;left:81"><nobr>using IORefs and unsafe malloc-ed byte arrays. We do not feel this</nobr></div>
+<div style="position:absolute;top:2005;left:81"><nobr>style of programming is an interesting use of Haskell, and it does</nobr></div>
+<div style="position:absolute;top:2020;left:81"><nobr>not reflect well on the goal of high-level programming in general.</nobr></div>
+<div style="position:absolute;top:2035;left:81"><nobr>Where exactly the boundaries of idiomatic programming begin and</nobr></div>
+<div style="position:absolute;top:2050;left:81"><nobr>end are entirely a matter of judgment. For example, we do make ex-</nobr></div>
+<div style="position:absolute;top:2065;left:81"><nobr>tensive use of strictness annotations and other non-standard GHC</nobr></div>
+<div style="position:absolute;top:2080;left:81"><nobr>extensions to Haskell. We discuss particular choices in this regard</nobr></div>
+<div style="position:absolute;top:2095;left:81"><nobr>in the discussion of each benchmark in Section 2.</nobr></div>
+<div style="position:absolute;top:2110;left:99"><nobr>In tuning the benchmarks, we profited significantly from being</nobr></div>
+<div style="position:absolute;top:2125;left:81"><nobr>our own compiler developers. In particular, we were able to study</nobr></div>
+<div style="position:absolute;top:2140;left:81"><nobr>the generated code of both GHC and our own compiler to better</nobr></div>
+<div style="position:absolute;top:2155;left:81"><nobr>understand weaknesses in the generated code. These weaknesses</nobr></div>
+<div style="position:absolute;top:2170;left:81"><nobr>could often be addressed by small changes in the source code.</nobr></div>
+<div style="position:absolute;top:2185;left:81"><nobr>This technique would be much less accessible to other Haskell</nobr></div>
+<div style="position:absolute;top:2200;left:81"><nobr>developers. We also made extensive use of the Intel VTune<font style="font-size:6px">TM</font>tool</nobr></div>
+<div style="position:absolute;top:2215;left:81"><nobr>to understand and tune performance.</nobr></div>
+<div style="position:absolute;top:2230;left:99"><nobr>In an ideal world, we would have kept our compiler fixed over</nobr></div>
+<div style="position:absolute;top:2245;left:81"><nobr>the course of this study. However, since our larger goal is the</nobr></div>
+<div style="position:absolute;top:2260;left:81"><nobr>development of the compiler itself, this work necessarily was used</nobr></div>
+<div style="position:absolute;top:2275;left:81"><nobr>to drive compiler development in the sense that weaknesses in the</nobr></div>
+<div style="position:absolute;top:2290;left:81"><nobr>compiler revealed by the benchmarks were sometimes addressed</nobr></div>
+<div style="position:absolute;top:2305;left:81"><nobr>in the compiler. The changes in the compiler were not done in an</nobr></div>
+<div style="position:absolute;top:2320;left:81"><nobr>ad hoc manner simply to address one particular benchmark, but</nobr></div>
+<div style="position:absolute;top:2335;left:81"><nobr>rather were generally beneficial optimizations. Nonetheless, this is</nobr></div>
+<div style="position:absolute;top:2350;left:81"><nobr>a weak point from the standpoint of viewing this as a scientific</nobr></div>
+<div style="position:absolute;top:2364;left:81"><nobr>performance study.</nobr></div>
+<div style="position:absolute;top:2379;left:99"><nobr>Our focus as a compiler development team is on our own com-</nobr></div>
+<div style="position:absolute;top:2394;left:81"><nobr>piler. We made reasonable efforts to select good optimization flags</nobr></div>
+<div style="position:absolute;top:2409;left:81"><nobr>for GHC and to provide fair measurements. However, it is very</nobr></div>
+<div style="position:absolute;top:2424;left:81"><nobr>possible that someone more familiar with the strengths and weak-</nobr></div>
+<div style="position:absolute;top:2439;left:81"><nobr>nesses of the GHC compiler might be able to improve upon the</nobr></div>
+<div style="position:absolute;top:1474;left:476"><nobr>relative performance of GHC vs our compiler. The style of bench-</nobr></div>
+<div style="position:absolute;top:1489;left:476"><nobr>mark measured here is also particularly favorable to our compiler.</nobr></div>
+<div style="position:absolute;top:1504;left:476"><nobr>We hope that these results will not be taken as a criticism of the</nobr></div>
+<div style="position:absolute;top:1519;left:476"><nobr>GHC compiler, especially given that we rely essentially on GHC as</nobr></div>
+<div style="position:absolute;top:1534;left:476"><nobr>a high-level optimizing front-end for our compiler.</nobr></div>
+<div style="position:absolute;top:1549;left:493"><nobr>As of this writing, we have only ported a subset of the bench-</nobr></div>
+<div style="position:absolute;top:1564;left:476"><nobr>marks from the ninja-gap paper. This selection is not entirely ran-</nobr></div>
+<div style="position:absolute;top:1578;left:476"><nobr>dom - the easier to port benchmarks were chosen for porting first,</nobr></div>
+<div style="position:absolute;top:1593;left:476"><nobr>and the last remaining un-ported benchmarks seem likely to be the</nobr></div>
+<div style="position:absolute;top:1608;left:476"><nobr>most difficult to get good performance on. The selection of bench-</nobr></div>
+<div style="position:absolute;top:1623;left:476"><nobr>marks should if anything therefore be viewed as skewed in favor of</nobr></div>
+<div style="position:absolute;top:1638;left:476"><nobr>Haskell.</nobr></div>
+<div style="position:absolute;top:1666;left:476"><nobr>1.4 HRC</nobr></div>
+<div style="position:absolute;top:1687;left:476"><nobr>HRC is discussed in detail elsewhere [6] and we only briefly de-</nobr></div>
+<div style="position:absolute;top:1702;left:476"><nobr>scribe it here. The compiler uses GHC as a front-end and intercepts</nobr></div>
+<div style="position:absolute;top:1717;left:476"><nobr>the Core intermediate language before generation of spineless-</nobr></div>
+<div style="position:absolute;top:1732;left:476"><nobr>tagless G-machine code. Core code for the entire program (includ-</nobr></div>
+<div style="position:absolute;top:1747;left:476"><nobr>ing all libraries) is aggregated by our compiler in order to perform</nobr></div>
+<div style="position:absolute;top:1762;left:476"><nobr>whole-program optimization. Some initial high-level optimization</nobr></div>
+<div style="position:absolute;top:1777;left:476"><nobr>and transformation are performed before translation to a strict SSA-</nobr></div>
+<div style="position:absolute;top:1792;left:476"><nobr>style internal representation in which most optimization is done.</nobr></div>
+<div style="position:absolute;top:1807;left:476"><nobr>The backend of our compiler generates code in an extension of C</nobr></div>
+<div style="position:absolute;top:1822;left:476"><nobr>called Pillar [1], which is then transformed to standard C code and</nobr></div>
+<div style="position:absolute;top:1837;left:476"><nobr>compiled with the Intel C compiler or GCC. Our compiler performs</nobr></div>
+<div style="position:absolute;top:1852;left:476"><nobr>a number of loop-based and representation-style optimizations as</nobr></div>
+<div style="position:absolute;top:1867;left:476"><nobr>described elsewhere [6, 7]. In addition, SIMD vectorization is per-</nobr></div>
+<div style="position:absolute;top:1882;left:476"><nobr>formed where applicable as described by Petersen et al [8].</nobr></div>
+<div style="position:absolute;top:1897;left:493"><nobr>HRC implements most of the functionality of the GHC system,</nobr></div>
+<div style="position:absolute;top:1911;left:476"><nobr>and can correctly compile and run most of the nofib benchmark</nobr></div>
+<div style="position:absolute;top:1926;left:476"><nobr>suite. The most notable known deficiencies in functionality are that:</nobr></div>
+<div style="position:absolute;top:1949;left:480"><nobr>1. Re-evaluating a thunk which exited with an exception will pro-</nobr></div>
+<div style="position:absolute;top:1964;left:495"><nobr>duce an error instead of re-raising the exception.</nobr></div>
+<div style="position:absolute;top:1985;left:480"><nobr>2. Asynchronous exceptions are not supported.</nobr></div>
+<div style="position:absolute;top:2008;left:476"><nobr>The first issue can be addressed but has not been a priority. Ad-</nobr></div>
+<div style="position:absolute;top:2023;left:476"><nobr>dressing it will likely have some adverse effect on performance of</nobr></div>
+<div style="position:absolute;top:2038;left:476"><nobr>thunk intensive code, but is irrelevant to these benchmarks, which</nobr></div>
+<div style="position:absolute;top:2053;left:476"><nobr>have no laziness in performance critical sections. The second is-</nobr></div>
+<div style="position:absolute;top:2068;left:476"><nobr>sue seems likely to be impossible to address given our language-</nobr></div>
+<div style="position:absolute;top:2083;left:476"><nobr>agnostic runtime representation.</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:14px;font-family:Times">
+<div style="position:absolute;top:2117;left:476"><nobr>2. The Benchmarks</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:2140;left:476"><nobr>We begin by describing qualitatively the benchmarks which we</nobr></div>
+<div style="position:absolute;top:2155;left:476"><nobr>have chosen to port, and the manner in which we have chosen</nobr></div>
+<div style="position:absolute;top:2170;left:476"><nobr>to port them. For each benchmark, the ninja-gap paper studied</nobr></div>
+<div style="position:absolute;top:2185;left:476"><nobr>three implementations: a naive C implementation (“naive C”), a</nobr></div>
+<div style="position:absolute;top:2200;left:476"><nobr>best-optimized implementation (“ninja C”), and an algorithmically</nobr></div>
+<div style="position:absolute;top:2215;left:476"><nobr>tuned C version (“optimized C”). The naive C code for a given</nobr></div>
+<div style="position:absolute;top:2230;left:476"><nobr>benchmark generally consisted of the “obvious” C implementation</nobr></div>
+<div style="position:absolute;top:2245;left:476"><nobr>for that benchmark, with little thought given to performance tuning.</nobr></div>
+<div style="position:absolute;top:2260;left:476"><nobr>The ninja code on the other hand consisted of deeply and carefully</nobr></div>
+<div style="position:absolute;top:2275;left:476"><nobr>optimized code, using compiler intrinsics and pragmas as appropri-</nobr></div>
+<div style="position:absolute;top:2290;left:476"><nobr>ate, validated to match the performance of the best published results</nobr></div>
+<div style="position:absolute;top:2305;left:476"><nobr>for that problem. Finally, the optimized C code was developed by</nobr></div>
+<div style="position:absolute;top:2320;left:476"><nobr>taking the naive C code and performing small, low-effort algorith-</nobr></div>
+<div style="position:absolute;top:2335;left:476"><nobr>mic improvements to produce C code comparable in performance</nobr></div>
+<div style="position:absolute;top:2350;left:476"><nobr>to that of the ninja code. For more details about the algorithms and</nobr></div>
+<div style="position:absolute;top:2364;left:476"><nobr>the C implementations upon which our C code is based, we refer</nobr></div>
+<div style="position:absolute;top:2379;left:476"><nobr>the reader to the ninja gap paper [9].</nobr></div>
+<div style="position:absolute;top:2394;left:493"><nobr>For our work, we have where possible reconstructed each of</nobr></div>
+<div style="position:absolute;top:2409;left:476"><nobr>the three C versions for each of the selected benchmarks, starting</nobr></div>
+<div style="position:absolute;top:2424;left:476"><nobr>from versions of the code used in the original ninja-gap paper. It is</nobr></div>
+<div style="position:absolute;top:2439;left:476"><nobr>important to note that since the ninja code was written for previous</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:2486;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:2486;left:445"><nobr>2</nobr></div>
+<div style="position:absolute;top:2486;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:2551;left:0"><hr></div><font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:2662;left:81"><nobr>architectures using (at times) hand-coded assembly or intrinsics, it</nobr></div>
+<div style="position:absolute;top:2677;left:81"><nobr>was explicitly not designed to be “future-proof”. That is, unlike the</nobr></div>
+<div style="position:absolute;top:2692;left:81"><nobr>optimized C code which could be successfully retargeted to a new</nobr></div>
+<div style="position:absolute;top:2707;left:81"><nobr>architecture simply by passing different flags to the C compiler,</nobr></div>
+<div style="position:absolute;top:2722;left:81"><nobr>the ninja code would require hand re-coding and re-tuning. While</nobr></div>
+<div style="position:absolute;top:2737;left:81"><nobr>we have for some of these benchmarks attempted this re-coding,</nobr></div>
+<div style="position:absolute;top:2752;left:81"><nobr>we cannot claim to be ninja-programmers, and so it is likely that</nobr></div>
+<div style="position:absolute;top:2766;left:81"><nobr>the ninja code that we measure no longer truly represents the best-</nobr></div>
+<div style="position:absolute;top:2781;left:81"><nobr>optimized code. Similarly, for the optimized C code, it is likely that</nobr></div>
+<div style="position:absolute;top:2796;left:81"><nobr>a small tuning effort comparable to that described in the ninja-gap</nobr></div>
+<div style="position:absolute;top:2811;left:81"><nobr>paper might give further performance improvements on machines</nobr></div>
+<div style="position:absolute;top:2826;left:81"><nobr>with non-uniform memory access (NUMA) behaviors such as those</nobr></div>
+<div style="position:absolute;top:2841;left:81"><nobr>on which we perform our measurements.</nobr></div>
+<div style="position:absolute;top:2856;left:99"><nobr>Given all this, we emphasize that the reader should interpret</nobr></div>
+<div style="position:absolute;top:2871;left:81"><nobr>our results not as situating Haskell relative to the absolute best C</nobr></div>
+<div style="position:absolute;top:2886;left:81"><nobr>versions, but rather as situating Haskell relative to a range of C</nobr></div>
+<div style="position:absolute;top:2901;left:81"><nobr>versions, from the fairly ordinary, to the very good, to the possibly</nobr></div>
+<div style="position:absolute;top:2916;left:81"><nobr>quite excellent. Nonetheless, for clarity and for consistency with</nobr></div>
+<div style="position:absolute;top:2931;left:81"><nobr>the ninja-gap paper, we continue to use the naive/optimized/ninja</nobr></div>
+<div style="position:absolute;top:2946;left:81"><nobr>terminology throughout the rest of the paper. In the rest of this</nobr></div>
+<div style="position:absolute;top:2961;left:81"><nobr>section, we describe each of the benchmarks that we have chosen</nobr></div>
+<div style="position:absolute;top:2976;left:81"><nobr>to port to Haskell in this manner.</nobr></div>
+<div style="position:absolute;top:3005;left:81"><nobr>2.1 NBody</nobr></div>
+<div style="position:absolute;top:3026;left:81"><nobr>The NBody benchmark is an implementation of the naive quadratic</nobr></div>
+<div style="position:absolute;top:3041;left:81"><nobr>algorithm for computing the aggregate forces between N point</nobr></div>
+<div style="position:absolute;top:3056;left:81"><nobr>masses. Given an array of bodies described as a coordinate in</nobr></div>
+<div style="position:absolute;top:3071;left:81"><nobr>space with a mass, the sum of the forces induced by the pair</nobr></div>
+<div style="position:absolute;top:3086;left:81"><nobr>wise interactions between each body and all of the other bodies</nobr></div>
+<div style="position:absolute;top:3101;left:81"><nobr>is computed and placed in an output array.</nobr></div>
+<div style="position:absolute;top:3116;left:99"><nobr>The translation of this benchmark to Haskell was entirely</nobr></div>
+<div style="position:absolute;top:3131;left:81"><nobr>straightforward using the Repa libraries [2, 4, 5]. Bodies are repre-</nobr></div>
+<div style="position:absolute;top:3146;left:81"><nobr>sented using quadruples of floating point numbers containing x, y,</nobr></div>
+<div style="position:absolute;top:3161;left:81"><nobr>and z coordinates along with a mass. Computed forces are repre-</nobr></div>
+<div style="position:absolute;top:3176;left:81"><nobr>sented as triples of floating point numbers. The vector of bodies is</nobr></div>
+<div style="position:absolute;top:3191;left:81"><nobr>represented using an unboxed dimension one vector of points, and</nobr></div>
+<div style="position:absolute;top:3206;left:81"><nobr>the result vector is represented using an unboxed dimension one</nobr></div>
+<div style="position:absolute;top:3221;left:81"><nobr>vector of forces. The main computational kernel then consists of</nobr></div>
+<div style="position:absolute;top:3236;left:81"><nobr>a parallel map over the points. At each point, another map is per-</nobr></div>
+<div style="position:absolute;top:3251;left:81"><nobr>formed to compute an intermediate vector containing the pair-wise</nobr></div>
+<div style="position:absolute;top:3266;left:81"><nobr>interactions between the given point and all other points. Finally, a</nobr></div>
+<div style="position:absolute;top:3281;left:81"><nobr>fold is performed over this intermediate vector summing the forces</nobr></div>
+<div style="position:absolute;top:3295;left:81"><nobr>computed by each pair-wise interaction. The computation of the</nobr></div>
+<div style="position:absolute;top:3310;left:81"><nobr>pair wise interaction between two points is computed as follows:</nobr></div>
+<div style="position:absolute;top:3335;left:81"><nobr>pointForce :: Point -&gt; Point -&gt; Force</nobr></div>
+<div style="position:absolute;top:3350;left:81"><nobr>pointForce (xi, yi, zi, _) (xj, yj, zj, mj) =</nobr></div>
+<div style="position:absolute;top:3365;left:95"><nobr>let</nobr></div>
+<div style="position:absolute;top:3380;left:109"><nobr>dx = xj-xi</nobr></div>
+<div style="position:absolute;top:3395;left:109"><nobr>dy = yj-yi</nobr></div>
+<div style="position:absolute;top:3410;left:109"><nobr>dz = zj-zi</nobr></div>
+<div style="position:absolute;top:3425;left:109"><nobr>eps_sqr = 0.01</nobr></div>
+<div style="position:absolute;top:3440;left:109"><nobr>gamma_0 = dx*dx + dy*dy + dz*dz + eps_sqr</nobr></div>
+<div style="position:absolute;top:3455;left:109"><nobr>s_0 = mj/(gamma_0 * sqrt(gamma_0))</nobr></div>
+<div style="position:absolute;top:3470;left:109"><nobr>r0 = s_0 * dx</nobr></div>
+<div style="position:absolute;top:3485;left:109"><nobr>r1 = s_0 * dy</nobr></div>
+<div style="position:absolute;top:3500;left:109"><nobr>r2 = s_0 * dz</nobr></div>
+<div style="position:absolute;top:3515;left:109"><nobr>r = (r0, r1, r2)</nobr></div>
+<div style="position:absolute;top:3529;left:95"><nobr>in r</nobr></div>
+<div style="position:absolute;top:3552;left:81"><nobr>Strictness annotations are required on the parameters to the helper</nobr></div>
+<div style="position:absolute;top:3567;left:81"><nobr>function which performs the summation in the fold (and nowhere</nobr></div>
+<div style="position:absolute;top:3582;left:81"><nobr>else). The Repa library provides a clean unboxed struct of array</nobr></div>
+<div style="position:absolute;top:3597;left:81"><nobr>(SOA) representation for the data structures, and avoids unneces-</nobr></div>
+<div style="position:absolute;top:3612;left:81"><nobr>sary subscript checks. The GHC compiler successfully eliminates</nobr></div>
+<div style="position:absolute;top:3627;left:81"><nobr>all of the intermediate data structures implied by the idiomatic code</nobr></div>
+<div style="position:absolute;top:2662;left:476"><nobr>as written, and the result after further optimization is clean tight in-</nobr></div>
+<div style="position:absolute;top:2677;left:476"><nobr>ner loop which is easily amenable to SIMD vectorization.</nobr></div>
+<div style="position:absolute;top:2692;left:493"><nobr>The naive C version of this benchmark uses a struct of array</nobr></div>
+<div style="position:absolute;top:2707;left:476"><nobr>(SOA) representation to represent the input vector of bodies and</nobr></div>
+<div style="position:absolute;top:2722;left:476"><nobr>the output vector of forces, and performs the computation using</nobr></div>
+<div style="position:absolute;top:2737;left:476"><nobr>a simple nested loop. The C compiler is unable to vectorize this</nobr></div>
+<div style="position:absolute;top:2752;left:476"><nobr>version, most likely because it is unable to prove that the array reads</nobr></div>
+<div style="position:absolute;top:2766;left:476"><nobr>and writes in the loop do not interfere.</nobr></div>
+<div style="position:absolute;top:2781;left:493"><nobr>The optimized C version of this benchmark uses a struct of array</nobr></div>
+<div style="position:absolute;top:2796;left:476"><nobr>representation, keeps all of the data structures in static globals, and</nobr></div>
+<div style="position:absolute;top:2811;left:476"><nobr>accumulates into temporary variables instead of directly into the</nobr></div>
+<div style="position:absolute;top:2826;left:476"><nobr>output array. As a result, the C compiler is able to vectorize this</nobr></div>
+<div style="position:absolute;top:2841;left:476"><nobr>very successfully. We implemented two different versions of this</nobr></div>
+<div style="position:absolute;top:2856;left:476"><nobr>optimizer version, one which unrolls the outer loop four times, and</nobr></div>
+<div style="position:absolute;top:2871;left:476"><nobr>second which does blocking to increase cache locality.</nobr></div>
+<div style="position:absolute;top:2886;left:493"><nobr>The inner loop for this benchmark is extremely tight, and a sub-</nobr></div>
+<div style="position:absolute;top:2901;left:476"><nobr>stantial speedup is obtained by the C compiler’s ability to eliminate</nobr></div>
+<div style="position:absolute;top:2916;left:476"><nobr>a division and square root instruction in favor of a single recipro-</nobr></div>
+<div style="position:absolute;top:2931;left:476"><nobr>cal square root instruction. This is done essentially by rewriting the</nobr></div>
+<div style="position:absolute;top:2946;left:476"><nobr>formula s<font style="font-size:6px">0 </font>= m<font style="font-size:6px">j </font>/(γ<font style="font-size:6px">0 </font>∗</nobr></div>
+<div style="position:absolute;top:2937;left:607"><nobr>√</nobr></div>
+<div style="position:absolute;top:2946;left:619"><nobr>γ<font style="font-size:6px">0</font>) as s<font style="font-size:6px">0 </font>= m<font style="font-size:6px">j </font>∗(1/</nobr></div>
+<div style="position:absolute;top:2937;left:734"><nobr>√</nobr></div>
+<div style="position:absolute;top:2946;left:746"><nobr>γ<font style="font-size:6px">0</font>)<font style="font-size:6px">3</font>). The latter</nobr></div>
+<div style="position:absolute;top:2961;left:476"><nobr>formula can be computed using only a single reciprocal square root</nobr></div>
+<div style="position:absolute;top:2976;left:476"><nobr>instruction and series of multiplies. Since the reciprocal square root</nobr></div>
+<div style="position:absolute;top:2991;left:476"><nobr>instruction and each multiply cost only a few cycles (both latency</nobr></div>
+<div style="position:absolute;top:3006;left:476"><nobr>and throughput) as opposed to the division and square root instruc-</nobr></div>
+<div style="position:absolute;top:3021;left:476"><nobr>tions which each cost tens of cycles, this optimization gives a more</nobr></div>
+<div style="position:absolute;top:3036;left:476"><nobr>than 2X speedup. The C compiler is not able to perform this opti-</nobr></div>
+<div style="position:absolute;top:3051;left:476"><nobr>mization for us on the already vectorized code that we emit, and so</nobr></div>
+<div style="position:absolute;top:3066;left:476"><nobr>we do not get the benefit of this optimization.</nobr></div>
+<div style="position:absolute;top:3080;left:493"><nobr>The ninja version of this benchmark was originally imple-</nobr></div>
+<div style="position:absolute;top:3095;left:476"><nobr>mented using SSE intrinsics, and modified for this paper to use</nobr></div>
+<div style="position:absolute;top:3110;left:476"><nobr>AVX intrinsics. All arrays are aligned on 256-bit boundaries allow-</nobr></div>
+<div style="position:absolute;top:3125;left:476"><nobr>ing the use of aligned loads. The outer loop is hand unrolled four</nobr></div>
+<div style="position:absolute;top:3140;left:476"><nobr>times. The algebraic re-arrangement described above is performed</nobr></div>
+<div style="position:absolute;top:3155;left:476"><nobr>by hand.</nobr></div>
+<div style="position:absolute;top:3185;left:476"><nobr>2.2 1D convolution</nobr></div>
+<div style="position:absolute;top:3206;left:476"><nobr>The 1D convolution benchmark performs a one-dimensional con-</nobr></div>
+<div style="position:absolute;top:3221;left:476"><nobr>volution on a large array of complex numbers (the real and imagi-</nobr></div>
+<div style="position:absolute;top:3236;left:476"><nobr>nary components of which are represented as single precision float-</nobr></div>
+<div style="position:absolute;top:3251;left:476"><nobr>ing point numbers). The kernel for the convolution contains 8192</nobr></div>
+<div style="position:absolute;top:3266;left:476"><nobr>floating point elements. The inner loop of the simple naive C ver-</nobr></div>
+<div style="position:absolute;top:3281;left:476"><nobr>sion consists of the following code:</nobr></div>
+<div style="position:absolute;top:3305;left:476"><nobr>for (i=0; i&lt;rep; i++) {</nobr></div>
+<div style="position:absolute;top:3320;left:490"><nobr>for (p=0; p&lt;(end-start); p++) {</nobr></div>
+<div style="position:absolute;top:3335;left:504"><nobr>out[p].r = 0.0;</nobr></div>
+<div style="position:absolute;top:3350;left:504"><nobr>out[p].i = 0.0;</nobr></div>
+<div style="position:absolute;top:3365;left:504"><nobr>for (f=0; f&lt;FSIZE; f++) {</nobr></div>
+<div style="position:absolute;top:3380;left:518"><nobr>out[p].r += in[p+f].r * coef[f] -</nobr></div>
+<div style="position:absolute;top:3395;left:603"><nobr>in[p+f].i * coef[f];</nobr></div>
+<div style="position:absolute;top:3410;left:518"><nobr>out[p].i += in[p+f].r * coef[f] +</nobr></div>
+<div style="position:absolute;top:3425;left:603"><nobr>in[p+f].i * coef[f];</nobr></div>
+<div style="position:absolute;top:3440;left:504"><nobr>}</nobr></div>
+<div style="position:absolute;top:3455;left:490"><nobr>}</nobr></div>
+<div style="position:absolute;top:3470;left:476"><nobr>}</nobr></div>
+<div style="position:absolute;top:3493;left:493"><nobr>As shown, the naive version uses an array of struct (AOS) rep-</nobr></div>
+<div style="position:absolute;top:3508;left:476"><nobr>resentation, passes arrays as function arguments, and accumulates</nobr></div>
+<div style="position:absolute;top:3523;left:476"><nobr>directly into the output array. Note that the input arrays are padded</nobr></div>
+<div style="position:absolute;top:3538;left:476"><nobr>to avoid the need for conditionals to deal with boundary condi-</nobr></div>
+<div style="position:absolute;top:3552;left:476"><nobr>tions. The optimized version passes arrays through globals, aligns</nobr></div>
+<div style="position:absolute;top:3567;left:476"><nobr>all arrays, uses a struct of array representation, and accumulates</nobr></div>
+<div style="position:absolute;top:3582;left:476"><nobr>into temporary variables. The C compiler is able to vectorize this</nobr></div>
+<div style="position:absolute;top:3597;left:476"><nobr>code very successfully.</nobr></div>
+<div style="position:absolute;top:3612;left:493"><nobr>The ninja version of this code uses the same basic representa-</nobr></div>
+<div style="position:absolute;top:3627;left:476"><nobr>tions as the optimized C version. The original version was imple-</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:3674;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:3674;left:445"><nobr>3</nobr></div>
+<div style="position:absolute;top:3674;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:3739;left:0"><hr></div><font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:3850;left:81"><nobr>mented using SSE intrinsics, and modified to use AVX intrinsics</nobr></div>
+<div style="position:absolute;top:3865;left:81"><nobr>for this paper. The inner loop in this version is hand-unrolled four</nobr></div>
+<div style="position:absolute;top:3880;left:81"><nobr>times.</nobr></div>
+<div style="position:absolute;top:3895;left:99"><nobr>Translating this code to Haskell presented a somewhat interest-</nobr></div>
+<div style="position:absolute;top:3910;left:81"><nobr>ing challenge. While the Repa libraries include support specifically</nobr></div>
+<div style="position:absolute;top:3925;left:81"><nobr>for stencils [4], this support is somewhat preliminary and is limited</nobr></div>
+<div style="position:absolute;top:3940;left:81"><nobr>to two dimensional arrays. Only small fixed size stencils are fully</nobr></div>
+<div style="position:absolute;top:3954;left:81"><nobr>optimized. However, after some brief experimentation a performant</nobr></div>
+<div style="position:absolute;top:3969;left:81"><nobr>implementation was obtained by using the Repa extract function to</nobr></div>
+<div style="position:absolute;top:3984;left:81"><nobr>obtain a slice of the input array which was then zipped together</nobr></div>
+<div style="position:absolute;top:3999;left:81"><nobr>with the stencil array using the convolution function, and then re-</nobr></div>
+<div style="position:absolute;top:4014;left:81"><nobr>duced with a fold. It was somewhat surprising to us that GHC was</nobr></div>
+<div style="position:absolute;top:4029;left:81"><nobr>able to successfully eliminate the implied intermediate arrays with</nobr></div>
+<div style="position:absolute;top:4044;left:81"><nobr>this, but combined with our backend optimizations we were indeed</nobr></div>
+<div style="position:absolute;top:4059;left:81"><nobr>able to obtain excellent code. The code of the stencil computation</nobr></div>
+<div style="position:absolute;top:4074;left:81"><nobr>is as follows:</nobr></div>
+<div style="position:absolute;top:4099;left:81"><nobr>convolve0 :: Complex -&gt; Float -&gt; Complex</nobr></div>
+<div style="position:absolute;top:4114;left:81"><nobr>convolve0 (r, i) s = (r*s - i*s, r*s + i*s)</nobr></div>
+<div style="position:absolute;top:4144;left:81"><nobr>convolve :: Int -&gt; Stencil -&gt; Data -&gt; Data</nobr></div>
+<div style="position:absolute;top:4159;left:81"><nobr>convolve size stencil input = output</nobr></div>
+<div style="position:absolute;top:4174;left:81"><nobr>where</nobr></div>
+<div style="position:absolute;top:4188;left:88"><nobr>genOne tag =</nobr></div>
+<div style="position:absolute;top:4203;left:95"><nobr>let</nobr></div>
+<div style="position:absolute;top:4218;left:102"><nobr>elements = R.extract tag stencilShape input</nobr></div>
+<div style="position:absolute;top:4233;left:102"><nobr>partials = R.zipWith convolve0 elements stencil</nobr></div>
+<div style="position:absolute;top:4248;left:95"><nobr>in R.foldAllS complexPlus (0.0, 0.0) partials</nobr></div>
+<div style="position:absolute;top:4263;left:88"><nobr>shape = R.Z R.:. size :: R.DIM1</nobr></div>
+<div style="position:absolute;top:4278;left:88"><nobr>[output] = R.computeUnboxedP</nobr></div>
+<div style="position:absolute;top:4293;left:166"><nobr>$ R.fromFunction shape genOne</nobr></div>
+<div style="position:absolute;top:4316;left:99"><nobr>Surprisingly, GHC itself performs extremely poorly on this</nobr></div>
+<div style="position:absolute;top:4331;left:81"><nobr>benchmark despite successfully eliminating the intermediate ar-</nobr></div>
+<div style="position:absolute;top:4346;left:81"><nobr>rays. We have not as of this writing been able to diagnose this,</nobr></div>
+<div style="position:absolute;top:4361;left:81"><nobr>other than to observe that it appears to be unable to elimimate</nobr></div>
+<div style="position:absolute;top:4376;left:81"><nobr>some remaining allocation from the inner loop.</nobr></div>
+<div style="position:absolute;top:4406;left:81"><nobr>2.3 2D Convolution</nobr></div>
+<div style="position:absolute;top:4427;left:81"><nobr>The 2D convolution benchmark performs a convolution over a two-</nobr></div>
+<div style="position:absolute;top:4442;left:81"><nobr>dimensional array of floating point numbers using a 5x5 stencil.</nobr></div>
+<div style="position:absolute;top:4457;left:99"><nobr>The naive C version passes arrays as function arguments, but</nobr></div>
+<div style="position:absolute;top:4472;left:81"><nobr>uses a temporary variable as an accumulator in the inner loop. The</nobr></div>
+<div style="position:absolute;top:4486;left:81"><nobr>C compiler is able to successfully vectorize this code, yielding good</nobr></div>
+<div style="position:absolute;top:4501;left:81"><nobr>speedups. The ninja gap paper reports using a preliminary version</nobr></div>
+<div style="position:absolute;top:4516;left:81"><nobr>of the Cilk++ array notation to produce an optimized version of</nobr></div>
+<div style="position:absolute;top:4531;left:81"><nobr>this code vectorized on the second-from-outer loop. The original</nobr></div>
+<div style="position:absolute;top:4546;left:81"><nobr>version of this code that we obtained was not compatible with</nobr></div>
+<div style="position:absolute;top:4561;left:81"><nobr>the current C compiler and we were not able to reconstruct this</nobr></div>
+<div style="position:absolute;top:4576;left:81"><nobr>code in the time available, and so we do not present results for this</nobr></div>
+<div style="position:absolute;top:4591;left:81"><nobr>configuration, comparing instead only the naive vectorized and the</nobr></div>
+<div style="position:absolute;top:4606;left:81"><nobr>ninja versions of the program.</nobr></div>
+<div style="position:absolute;top:4621;left:99"><nobr>The ninja version of the code is implemented using SSE intrin-</nobr></div>
+<div style="position:absolute;top:4636;left:81"><nobr>sics, which we have not yet updated to the wider AVX instructions.</nobr></div>
+<div style="position:absolute;top:4651;left:81"><nobr>The ninja code performs the outer-loop vectorization described in</nobr></div>
+<div style="position:absolute;top:4666;left:81"><nobr>the original ninja-gap paper, fully eliminating the inner loop in fa-</nobr></div>
+<div style="position:absolute;top:4681;left:81"><nobr>vor of straightline SSE code.</nobr></div>
+<div style="position:absolute;top:4696;left:99"><nobr>Producing a Haskell version of this code was entirely straight-</nobr></div>
+<div style="position:absolute;top:4711;left:81"><nobr>forward, since the Repa stencil libraries provide direct support for</nobr></div>
+<div style="position:absolute;top:4726;left:81"><nobr>this style of stencil operation. Interestingly, the problem as origi-</nobr></div>
+<div style="position:absolute;top:4740;left:81"><nobr>nally written used a stencil of all ones, with the result that the com-</nobr></div>
+<div style="position:absolute;top:4755;left:81"><nobr>piler stack was able to eliminate all of the stencil multiplies entirely.</nobr></div>
+<div style="position:absolute;top:4770;left:81"><nobr>While indicative of the greater optimization flexibility available in</nobr></div>
+<div style="position:absolute;top:4785;left:81"><nobr>a functional language, it was felt that this was not indicative of the</nobr></div>
+<div style="position:absolute;top:4800;left:81"><nobr>performance of the code on general stencil problems, and so the</nobr></div>
+<div style="position:absolute;top:4815;left:81"><nobr>stencil was changed in both the C and the Haskell code to consist</nobr></div>
+<div style="position:absolute;top:3850;left:476"><nobr>of all twos. With this change we are still able to constant propagate</nobr></div>
+<div style="position:absolute;top:3865;left:476"><nobr>the value, but the multiply can no longer be eliminated. The gener-</nobr></div>
+<div style="position:absolute;top:3880;left:476"><nobr>ated code is overall quite good, and our compiler is able to vectorize</nobr></div>
+<div style="position:absolute;top:3895;left:476"><nobr>the inner loop. However, due to unrolling performed by the Repa</nobr></div>
+<div style="position:absolute;top:3910;left:476"><nobr>libraries, our vector code must use strided load instructions which</nobr></div>
+<div style="position:absolute;top:3925;left:476"><nobr>are not supported in the AVX instruction set and instead must be</nobr></div>
+<div style="position:absolute;top:3940;left:476"><nobr>emulated with some loss of speedup. Since there is overlap in the</nobr></div>
+<div style="position:absolute;top:3954;left:476"><nobr>values loaded in the unrolled loop, lowering the strided loads to</nobr></div>
+<div style="position:absolute;top:3969;left:476"><nobr>scalar loads in our compiler (rather than emulating them in the code</nobr></div>
+<div style="position:absolute;top:3984;left:476"><nobr>generator) allowed the compiler to eliminate a number of the loads</nobr></div>
+<div style="position:absolute;top:3999;left:476"><nobr>using common sub-expression elimination.</nobr></div>
+<div style="position:absolute;top:4014;left:493"><nobr>A difficult issue arose in the translation and measurement of the</nobr></div>
+<div style="position:absolute;top:4029;left:476"><nobr>2D convolution benchmark, as well as several other of the ported</nobr></div>
+<div style="position:absolute;top:4044;left:476"><nobr>benchmarks. In order to measure large enough problem sizes to</nobr></div>
+<div style="position:absolute;top:4059;left:476"><nobr>obtain good timing results (particularly at larger number of proces-</nobr></div>
+<div style="position:absolute;top:4074;left:476"><nobr>sors), the C programs were written to iteratively re-compute the re-</nobr></div>
+<div style="position:absolute;top:4089;left:476"><nobr>sult an arbitrary number of times as specified on the command line.</nobr></div>
+<div style="position:absolute;top:4104;left:476"><nobr>The re-computation is performed after distribution of the work to</nobr></div>
+<div style="position:absolute;top:4119;left:476"><nobr>the worker threads: that is, each worker thread receives a portion</nobr></div>
+<div style="position:absolute;top:4134;left:476"><nobr>of an array to convolve, and an iteration count telling it how many</nobr></div>
+<div style="position:absolute;top:4149;left:476"><nobr>times to perform the convolution. We saw no way to implement</nobr></div>
+<div style="position:absolute;top:4164;left:476"><nobr>this directly in the Haskell code, and were forced instead to iterate</nobr></div>
+<div style="position:absolute;top:4179;left:476"><nobr>notionally outside of the worker threads by repeatedly doing the en-</nobr></div>
+<div style="position:absolute;top:4194;left:476"><nobr>tire convolution. This is problematic for comparison purposes for a</nobr></div>
+<div style="position:absolute;top:4208;left:476"><nobr>number of reasons: firstly in that it potentially introduces additional</nobr></div>
+<div style="position:absolute;top:4223;left:476"><nobr>synchronization and communication overhead; secondly in that in-</nobr></div>
+<div style="position:absolute;top:4238;left:476"><nobr>troduced garbage collection into the equation since new result ar-</nobr></div>
+<div style="position:absolute;top:4253;left:476"><nobr>rays must be allocated and collected; and thirdly that it produces</nobr></div>
+<div style="position:absolute;top:4268;left:476"><nobr>somewhat different cache behavior than in the C program. All of</nobr></div>
+<div style="position:absolute;top:4283;left:476"><nobr>the C benchmarks were written in this style, and we do not have a</nobr></div>
+<div style="position:absolute;top:4298;left:476"><nobr>general solution to this problem. Where possible, we have chosen to</nobr></div>
+<div style="position:absolute;top:4313;left:476"><nobr>increase the problem size to the point where a single iteration suf-</nobr></div>
+<div style="position:absolute;top:4328;left:476"><nobr>fices. For some programs, such as the 2d convolution, this was not</nobr></div>
+<div style="position:absolute;top:4343;left:476"><nobr>possible. We believe that in principle the additional synchroniza-</nobr></div>
+<div style="position:absolute;top:4358;left:476"><nobr>tion overhead is small relative to the work performed, and adding</nobr></div>
+<div style="position:absolute;top:4373;left:476"><nobr>synchronization to the C program between each iteration does not</nobr></div>
+<div style="position:absolute;top:4388;left:476"><nobr>substantially change its performance. Garbage collection time does</nobr></div>
+<div style="position:absolute;top:4403;left:476"><nobr>not account for a large portion of the 2D convolution time: however,</nobr></div>
+<div style="position:absolute;top:4418;left:476"><nobr>there are almost certainly mutator effects as a result of the garbage</nobr></div>
+<div style="position:absolute;top:4433;left:476"><nobr>collections and the fresh allocations of the result arrays.</nobr></div>
+<div style="position:absolute;top:4465;left:476"><nobr>2.4 Black Scholes</nobr></div>
+<div style="position:absolute;top:4486;left:476"><nobr>The Black Scholes benchmark computes put and call options. The</nobr></div>
+<div style="position:absolute;top:4501;left:476"><nobr>computational kernel is a loop computing a cumulative normal</nobr></div>
+<div style="position:absolute;top:4516;left:476"><nobr>distribution function. The inner loop of the computation contains</nobr></div>
+<div style="position:absolute;top:4531;left:476"><nobr>conditionals.</nobr></div>
+<div style="position:absolute;top:4546;left:493"><nobr>The naive C version uses an array of struct representation. The</nobr></div>
+<div style="position:absolute;top:4561;left:476"><nobr>C compiler does not choose to auto-vectorize the loop. Annotating</nobr></div>
+<div style="position:absolute;top:4576;left:476"><nobr>the loop with “#pragma simd” allows the loop to be vectorized:</nobr></div>
+<div style="position:absolute;top:4591;left:476"><nobr>however, the AOS representation is poorly suited to vector code</nobr></div>
+<div style="position:absolute;top:4606;left:476"><nobr>generation.</nobr></div>
+<div style="position:absolute;top:4621;left:493"><nobr>The optimized C version uses a struct of array representation,</nobr></div>
+<div style="position:absolute;top:4636;left:476"><nobr>but the auto-vectorizer still chooses not to vectorize the loop. Once</nobr></div>
+<div style="position:absolute;top:4651;left:476"><nobr>again annotating the loop with “#pragma simd” suffices to cause</nobr></div>
+<div style="position:absolute;top:4666;left:476"><nobr>vector code to be generated. The SOA format is better suited to</nobr></div>
+<div style="position:absolute;top:4681;left:476"><nobr>vector code generation.</nobr></div>
+<div style="position:absolute;top:4696;left:493"><nobr>The ninja version use the same representation as the optimized</nobr></div>
+<div style="position:absolute;top:4711;left:476"><nobr>C version but is written using AVX intrinsics directly.</nobr></div>
+<div style="position:absolute;top:4726;left:493"><nobr>The Haskell port of this code was subject to fairly extensive</nobr></div>
+<div style="position:absolute;top:4740;left:476"><nobr>performance tuning. The core of the kernel is a relatively straight-</nobr></div>
+<div style="position:absolute;top:4755;left:476"><nobr>forward translation of the C code, with some re-arrangement to</nobr></div>
+<div style="position:absolute;top:4770;left:476"><nobr>eliminate some conditionals. One strictness annotation is used on a</nobr></div>
+<div style="position:absolute;top:4785;left:476"><nobr>helper function.</nobr></div>
+<div style="position:absolute;top:4800;left:493"><nobr>The option data is represented as a tuple, and the input array of</nobr></div>
+<div style="position:absolute;top:4815;left:476"><nobr>options is represented as a one-dimensional Repa unboxed array of</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:4862;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:4862;left:445"><nobr>4</nobr></div>
+<div style="position:absolute;top:4862;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:4927;left:0"><hr></div><font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:5038;left:81"><nobr>options. The Repa library performs the AOS-SOA conversion on</nobr></div>
+<div style="position:absolute;top:5053;left:81"><nobr>the input data. The iteration over the option array to produce the</nobr></div>
+<div style="position:absolute;top:5068;left:81"><nobr>result is performed using the Repa “map” function over the input</nobr></div>
+<div style="position:absolute;top:5083;left:81"><nobr>array.</nobr></div>
+<div style="position:absolute;top:5107;left:81"><nobr>2.5 Volume Rendering</nobr></div>
+<div style="position:absolute;top:5128;left:81"><nobr>The volume rendering benchmark projects two-dimensional images</nobr></div>
+<div style="position:absolute;top:5143;left:81"><nobr>into a three-dimensional volume. The computation is irregular, with</nobr></div>
+<div style="position:absolute;top:5158;left:81"><nobr>conditionals and a data-dependent while-loop.</nobr></div>
+<div style="position:absolute;top:5173;left:99"><nobr>The naive C version of this benchmark passes all arguments</nobr></div>
+<div style="position:absolute;top:5188;left:81"><nobr>in global variables, and is sufficiently well-optimized by the C</nobr></div>
+<div style="position:absolute;top:5203;left:81"><nobr>compiler that no optimized version was written.</nobr></div>
+<div style="position:absolute;top:5218;left:99"><nobr>The ninja version of the benchmark uses handwritten AVX in-</nobr></div>
+<div style="position:absolute;top:5233;left:81"><nobr>trinsics. Mask registers are simulated using standard AVX registers.</nobr></div>
+<div style="position:absolute;top:5248;left:99"><nobr>Writing a performance version of this benchmark in Haskell</nobr></div>
+<div style="position:absolute;top:5263;left:81"><nobr>was somewhat challenging, since the structure of the kernel com-</nobr></div>
+<div style="position:absolute;top:5278;left:81"><nobr>putation does not fit naturally into any of the patterns supported by</nobr></div>
+<div style="position:absolute;top:5293;left:81"><nobr>existing array libraries. The final tuned implementation implements</nobr></div>
+<div style="position:absolute;top:5308;left:81"><nobr>the inner loop of the computation as recursive function which tra-</nobr></div>
+<div style="position:absolute;top:5323;left:81"><nobr>verses a section of the opacity and visibility arrays from the input</nobr></div>
+<div style="position:absolute;top:5338;left:81"><nobr>data. Unsafe indexing is used in this function, and strictness an-</nobr></div>
+<div style="position:absolute;top:5353;left:81"><nobr>notations were required on the arguments. The function contains</nobr></div>
+<div style="position:absolute;top:5368;left:81"><nobr>multiple recursive calls, all in tail positions.</nobr></div>
+<div style="position:absolute;top:5383;left:99"><nobr>The outer iteration of the computation is performed using the</nobr></div>
+<div style="position:absolute;top:5397;left:81"><nobr>Repa “traverse” array generator to traverse the input array of rays,</nobr></div>
+<div style="position:absolute;top:5412;left:81"><nobr>obtaining the index of each element in the process for use in the</nobr></div>
+<div style="position:absolute;top:5427;left:81"><nobr>call to the recursive function. The use of traverse incurs an extra</nobr></div>
+<div style="position:absolute;top:5442;left:81"><nobr>array bounds check which is not eliminated in this code. Strictness</nobr></div>
+<div style="position:absolute;top:5457;left:81"><nobr>annotations are also used on these iteration functions.</nobr></div>
+<div style="position:absolute;top:5482;left:81"><nobr>2.6 Tree Search</nobr></div>
+<div style="position:absolute;top:5503;left:81"><nobr>The tree search benchmark does a search on a structured tree to find</nobr></div>
+<div style="position:absolute;top:5518;left:81"><nobr>data by index. The code is consequently quite control dependent.</nobr></div>
+<div style="position:absolute;top:5533;left:99"><nobr>The naive C version is implemented using the obvious binary</nobr></div>
+<div style="position:absolute;top:5548;left:81"><nobr>search algorithm over a static index structure laid out breadth first</nobr></div>
+<div style="position:absolute;top:5563;left:81"><nobr>in an array.</nobr></div>
+<div style="position:absolute;top:5578;left:99"><nobr>The optimized C version implements a fast algorithm by Kim</nobr></div>
+<div style="position:absolute;top:5593;left:81"><nobr>et al [3], performing multi-level search over a tree re-organized</nobr></div>
+<div style="position:absolute;top:5608;left:81"><nobr>into hierarchical blocks. The blocking structure helps to improve</nobr></div>
+<div style="position:absolute;top:5623;left:81"><nobr>page and cache memory locality, and even permits a SIMD vector</nobr></div>
+<div style="position:absolute;top:5638;left:81"><nobr>implementation. Further optimizations such as loop unrolling make</nobr></div>
+<div style="position:absolute;top:5653;left:81"><nobr>the code suitable for compiler auto vectorization.</nobr></div>
+<div style="position:absolute;top:5667;left:99"><nobr>The Ninja C version implements the same algorithm as the</nobr></div>
+<div style="position:absolute;top:5682;left:81"><nobr>optimized C with hand written SSE intrinsics. It also implements</nobr></div>
+<div style="position:absolute;top:5697;left:81"><nobr>SIMD-level blocking as well as pipelining, neither of which are</nobr></div>
+<div style="position:absolute;top:5712;left:81"><nobr>used by the optimized C version. These optimizations require the</nobr></div>
+<div style="position:absolute;top:5727;left:81"><nobr>use of gather instructions which must be emulated on CPU.</nobr></div>
+<div style="position:absolute;top:5742;left:99"><nobr>The Haskell version of the code represents the search tree using</nobr></div>
+<div style="position:absolute;top:5757;left:81"><nobr>a Repa unboxed array, and implements the same basic binary search</nobr></div>
+<div style="position:absolute;top:5772;left:81"><nobr>as the naive C version. A slightly simplified code snippet is given</nobr></div>
+<div style="position:absolute;top:5787;left:81"><nobr>below:</nobr></div>
+<div style="position:absolute;top:5810;left:81"><nobr>search :: Int -&gt; Array Key -&gt; Key -&gt; Bool</nobr></div>
+<div style="position:absolute;top:5825;left:81"><nobr>search limit tree k = search’ 0</nobr></div>
+<div style="position:absolute;top:5840;left:95"><nobr>where</nobr></div>
+<div style="position:absolute;top:5855;left:109"><nobr>search’ offset | offset &gt;= limit = False</nobr></div>
+<div style="position:absolute;top:5870;left:215"><nobr>| otherwise</nobr></div>
+<div style="position:absolute;top:5870;left:342"><nobr>=</nobr></div>
+<div style="position:absolute;top:5885;left:123"><nobr>let u = tree ‘R.unsafeIndex‘ (Z :. offset)</nobr></div>
+<div style="position:absolute;top:5900;left:123"><nobr>in case compare k u of</nobr></div>
+<div style="position:absolute;top:5914;left:159"><nobr>LT -&gt; search’ (offset * 2 + 1)</nobr></div>
+<div style="position:absolute;top:5929;left:159"><nobr>GT -&gt; search’ (offset * 2 + 2)</nobr></div>
+<div style="position:absolute;top:5944;left:159"><nobr>EQ -&gt; True</nobr></div>
+<div style="position:absolute;top:5974;left:81"><nobr>query depth tree queries =</nobr></div>
+<div style="position:absolute;top:5989;left:95"><nobr>R.computeUnboxedP $ R.map fn queries</nobr></div>
+<div style="position:absolute;top:6004;left:109"><nobr>where fn = fromEnum . searchBase limit tree</nobr></div>
+<div style="position:absolute;top:5039;left:546"><nobr>limit = 2 ^ depth - 1</nobr></div>
+<div style="position:absolute;top:5062;left:476"><nobr>The above code looks like a good target to turn into fast performing</nobr></div>
+<div style="position:absolute;top:5077;left:476"><nobr>code because (1) the search is tail recursive; and (2) it already uses</nobr></div>
+<div style="position:absolute;top:5092;left:476"><nobr>unsafe array indexing to avoid range checking. However, there is a</nobr></div>
+<div style="position:absolute;top:5107;left:476"><nobr>very subtle issue about the computation of limit. We may expect</nobr></div>
+<div style="position:absolute;top:5122;left:476"><nobr>that a Haskell compiler can evaluate limit eagerly before entering</nobr></div>
+<div style="position:absolute;top:5136;left:476"><nobr>the loop (R.map) over queries, but it turns out this cannot be done.</nobr></div>
+<div style="position:absolute;top:5151;left:476"><nobr>Because the size of queries may be zero, the loop body may never</nobr></div>
+<div style="position:absolute;top:5166;left:476"><nobr>be entered, and hence the evaluation of limit is not guaranteed. So</nobr></div>
+<div style="position:absolute;top:5182;left:476"><nobr>limit is kept as a thunk that is visited in every iteration of the ouer</nobr></div>
+<div style="position:absolute;top:5196;left:476"><nobr>loop (R.map). Simply putting seq limit in front of R.computeP</nobr></div>
+<div style="position:absolute;top:5211;left:476"><nobr>to force evaluating it solves the problem. The result is a thunk-free</nobr></div>
+<div style="position:absolute;top:5226;left:476"><nobr>double loop (as confirmed by HRC’s output IR), giving around a</nobr></div>
+<div style="position:absolute;top:5241;left:476"><nobr>10% speedup to the final performance. This level of tuning requires</nobr></div>
+<div style="position:absolute;top:5256;left:476"><nobr>a deep understanding of how Haskell compilation works, which</nobr></div>
+<div style="position:absolute;top:5271;left:476"><nobr>may be out-of-reach for ordinary functional programmers.</nobr></div>
+<div style="position:absolute;top:5286;left:493"><nobr>Both the ninja C and the optimized C programs can only deal</nobr></div>
+<div style="position:absolute;top:5301;left:476"><nobr>with a specific fixed tree depth in order to completely unroll the</nobr></div>
+<div style="position:absolute;top:5316;left:476"><nobr>inner loops and get rid of all early loop exits. In contrast, the naive</nobr></div>
+<div style="position:absolute;top:5331;left:476"><nobr>C and Haskell version can deal with arbitrary tree size.</nobr></div>
+<div style="position:absolute;top:5346;left:493"><nobr>We have also attempted to implement the blocking algorithm</nobr></div>
+<div style="position:absolute;top:5361;left:476"><nobr>used by the optimized C program in Haskell. It naturally involves</nobr></div>
+<div style="position:absolute;top:5376;left:476"><nobr>nested recursions, but expecting them to be flattened into a single</nobr></div>
+<div style="position:absolute;top:5391;left:476"><nobr>loop is beyond the reach of either GHC or HRC. We might have</nobr></div>
+<div style="position:absolute;top:5405;left:476"><nobr>attempted to unroll the nested loops by hand as in the optimized C</nobr></div>
+<div style="position:absolute;top:5420;left:476"><nobr>program, but we choose not to do so since this seemed to be moving</nobr></div>
+<div style="position:absolute;top:5435;left:476"><nobr>out of the space of idiomatic Haskell programs. The generic block-</nobr></div>
+<div style="position:absolute;top:5450;left:476"><nobr>ing search has more overhead that outweighs the benefit of having</nobr></div>
+<div style="position:absolute;top:5465;left:476"><nobr>better memory locality, and consequently we do not present results</nobr></div>
+<div style="position:absolute;top:5480;left:476"><nobr>for the blocking version of the Haskell tree search program.</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:14px;font-family:Times">
+<div style="position:absolute;top:5517;left:476"><nobr>3. Performance Comparison</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:5540;left:476"><nobr>Generally we analyze five different configurations, three C config-</nobr></div>
+<div style="position:absolute;top:5555;left:476"><nobr>urations and two Haskell configurations, but sometimes some con-</nobr></div>
+<div style="position:absolute;top:5570;left:476"><nobr>figurations are not available or not reportable for reasons noted be-</nobr></div>
+<div style="position:absolute;top:5585;left:476"><nobr>low. The three C configurations are called naive, optimized, and</nobr></div>
+<div style="position:absolute;top:5600;left:476"><nobr>ninja. They correspond to the three types of C in the ninja gap pa-</nobr></div>
+<div style="position:absolute;top:5615;left:476"><nobr>per. C naive is straightforwardly written C that solves the problem;</nobr></div>
+<div style="position:absolute;top:5630;left:476"><nobr>C ninja is hand optimized and hand tuned, often using compiler in-</nobr></div>
+<div style="position:absolute;top:5645;left:476"><nobr>trinsics and pragmas, and often hand implementing optimizations</nobr></div>
+<div style="position:absolute;top:5660;left:476"><nobr>that the C compiler cannot or will not perform; C optimized is an</nobr></div>
+<div style="position:absolute;top:5674;left:476"><nobr>intermediate point where algorithm transformation and compiler</nobr></div>
+<div style="position:absolute;top:5689;left:476"><nobr>pragmas and/or flags are used to tune the performance. Note that</nobr></div>
+<div style="position:absolute;top:5704;left:476"><nobr>very few programmers have the skill to produce C ninja; many</nobr></div>
+<div style="position:absolute;top:5719;left:476"><nobr>more programmers have or can be taught the skills to produce C</nobr></div>
+<div style="position:absolute;top:5734;left:476"><nobr>optimized.</nobr></div>
+<div style="position:absolute;top:5749;left:493"><nobr>We analyze the performance of the benchmarks in terms of both</nobr></div>
+<div style="position:absolute;top:5764;left:476"><nobr>sequential performance and parallel speedup. For each benchmark</nobr></div>
+<div style="position:absolute;top:5779;left:476"><nobr>we present two charts: a chart show sequential speedup relative to</nobr></div>
+<div style="position:absolute;top:5794;left:476"><nobr>the C naive configuration, and a chart showing parallel speedup</nobr></div>
+<div style="position:absolute;top:5809;left:476"><nobr>relative to the best-performing sequential algorithm.</nobr></div>
+<div style="position:absolute;top:5824;left:493"><nobr>For the sequential performance chart, all numbers are normal-</nobr></div>
+<div style="position:absolute;top:5839;left:476"><nobr>ized to C naive: that is, for a given configuration, the height of the</nobr></div>
+<div style="position:absolute;top:5854;left:476"><nobr>bar on the Y axis is computed by dividing its run time by the run</nobr></div>
+<div style="position:absolute;top:5869;left:476"><nobr>time of the C naive configuration. Hence, lower is better on these</nobr></div>
+<div style="position:absolute;top:5884;left:476"><nobr>charts.</nobr></div>
+<div style="position:absolute;top:5899;left:493"><nobr>For the parallel speedup charts, we show speedup relative to the</nobr></div>
+<div style="position:absolute;top:5914;left:476"><nobr>best sequential configuration, whichever that is: generally, but not</nobr></div>
+<div style="position:absolute;top:5928;left:476"><nobr>always this is the C ninja configuration. For a given configuration,</nobr></div>
+<div style="position:absolute;top:5943;left:476"><nobr>the X axis indicates the number of parallel threads run, and the</nobr></div>
+<div style="position:absolute;top:5958;left:476"><nobr>value on the Y axis is computed by dividing the run time of that</nobr></div>
+<div style="position:absolute;top:5973;left:476"><nobr>configuration (on that number of threads) by the run time of the best</nobr></div>
+<div style="position:absolute;top:5988;left:476"><nobr>sequential configuration on one thread. Higher is better on these</nobr></div>
+<div style="position:absolute;top:6003;left:476"><nobr>graphs.</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:6050;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:6050;left:445"><nobr>5</nobr></div>
+<div style="position:absolute;top:6050;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:6115;left:0"><hr></div><font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:6226;left:99"><nobr>For each benchmark, we also calculate the Haskell Gap between</nobr></div>
+<div style="position:absolute;top:6241;left:81"><nobr>the best performing C code and the best performing Haskell code.</nobr></div>
+<div style="position:absolute;top:6256;left:81"><nobr>This number is calculated by dividing the fastest runtime for the</nobr></div>
+<div style="position:absolute;top:6271;left:81"><nobr>Haskell version (at any number of cores) by the fast runtime for</nobr></div>
+<div style="position:absolute;top:6286;left:81"><nobr>any of the C versions (at any number of cores). This number gives</nobr></div>
+<div style="position:absolute;top:6301;left:81"><nobr>the slowdown (or speedup) factor of the Haskell code relative to the</nobr></div>
+<div style="position:absolute;top:6316;left:81"><nobr>best C, allowing for both sequential and parallel speedup.</nobr></div>
+<div style="position:absolute;top:6330;left:99"><nobr>All of the C programs measured in this paper were compiled</nobr></div>
+<div style="position:absolute;top:6345;left:81"><nobr>using the Intel C++ Compiler, version 13.1.2.190. All of the GHC</nobr></div>
+<div style="position:absolute;top:6360;left:81"><nobr>compiled Haskell programs were compiled with GHC version</nobr></div>
+<div style="position:absolute;top:6375;left:81"><nobr>7.6.1. When compiled with the LLVM backend, LLVM version 2.9</nobr></div>
+<div style="position:absolute;top:6390;left:81"><nobr>was used. For all GHC configurations, the “-optlc-enable-unsafe-</nobr></div>
+<div style="position:absolute;top:6405;left:81"><nobr>fp-math” option was passed to GHC to permit unsafe floating point</nobr></div>
+<div style="position:absolute;top:6420;left:81"><nobr>optimizations to be performed.</nobr></div>
+<div style="position:absolute;top:6447;left:81"><nobr>3.1 CPU</nobr></div>
+<div style="position:absolute;top:6468;left:81"><nobr>We first report results as measured on an Intel Xeon CPU with</nobr></div>
+<div style="position:absolute;top:6483;left:81"><nobr>128 GB of RAM running Microsoft Windows Server 2008. The</nobr></div>
+<div style="position:absolute;top:6498;left:81"><nobr>machine contains 4 Intel Xeon E5-4650 (codename Sandy Bridge)</nobr></div>
+<div style="position:absolute;top:6513;left:81"><nobr>processors, each of which has 8 cores for a total of 32 execution</nobr></div>
+<div style="position:absolute;top:6528;left:81"><nobr>cores. Each core has 32KB L1 data and instruction caches and a</nobr></div>
+<div style="position:absolute;top:6543;left:81"><nobr>256KB L2 cache. Each processor has a 20MB L3 cache shared</nobr></div>
+<div style="position:absolute;top:6558;left:81"><nobr>among 8 cores. All runs were performed with hyperthreading off.</nobr></div>
+<div style="position:absolute;top:6584;left:81"><nobr>3.1.1 1D Convolution</nobr></div>
+<div style="position:absolute;top:6605;left:81"><nobr>For the 1D convolution benchmark, we measured four configura-</nobr></div>
+<div style="position:absolute;top:6620;left:81"><nobr>tions: the naive C, the optimized C, the ninja (AVX) C, and Haskell</nobr></div>
+<div style="position:absolute;top:6635;left:81"><nobr>compiled with our compiler. Haskell compiled with GHC runs sev-</nobr></div>
+<div style="position:absolute;top:6650;left:81"><nobr>eral orders of magnitude slower. We do not include GHC numbers</nobr></div>
+<div style="position:absolute;top:6665;left:81"><nobr>since running the GHC compiled code on a sufficiently large prob-</nobr></div>
+<div style="position:absolute;top:6680;left:81"><nobr>lem size is impractical for this benchmark. All numbers were taken</nobr></div>
+<div style="position:absolute;top:6695;left:81"><nobr>by convolving 3,000,000 elements.</nobr></div>
+<div style="position:absolute;top:6710;left:99"><nobr>The relative sequential performance is given in Figure 1. For this</nobr></div>
+<div style="position:absolute;top:6725;left:81"><nobr>benchmark, the optimized C code runs in approximately 16% of the</nobr></div>
+<div style="position:absolute;top:6740;left:81"><nobr>time taken by the naive C program. This is a good example of the</nobr></div>
+<div style="position:absolute;top:6755;left:81"><nobr>hazards of comparison to C that we wish to highlight in this paper.</nobr></div>
+<div style="position:absolute;top:6770;left:81"><nobr>Even keeping the C compiler fixed, we observe an 85% reduction</nobr></div>
+<div style="position:absolute;top:6785;left:81"><nobr>in run time simply through the use of a few quite small changes</nobr></div>
+<div style="position:absolute;top:6800;left:81"><nobr>to the source code. The ninja code (written using AVX intrinsics)</nobr></div>
+<div style="position:absolute;top:6815;left:81"><nobr>does not perform as well as the code optimized by the C compiler.</nobr></div>
+<div style="position:absolute;top:6830;left:81"><nobr>This may reflect either improvements in the C compiler since the</nobr></div>
+<div style="position:absolute;top:6845;left:81"><nobr>original ninja gap paper was written, or changes in the underlying</nobr></div>
+<div style="position:absolute;top:6859;left:81"><nobr>architecture, or both. On the latter point, it is important to note that</nobr></div>
+<div style="position:absolute;top:6874;left:81"><nobr>the ninja versions of these benchmarks, written using intrinsics, are</nobr></div>
+<div style="position:absolute;top:6889;left:81"><nobr>explicitly not “future-proof”: that is, they are highly tuned to an</nobr></div>
+<div style="position:absolute;top:6904;left:81"><nobr>explicit architecture and instruction set.</nobr></div>
+<div style="position:absolute;top:6919;left:99"><nobr>The Haskell code compiled with HRC runs in 22% of the time</nobr></div>
+<div style="position:absolute;top:6934;left:81"><nobr>taken by the naive C code. This is a substantial speedup over the</nobr></div>
+<div style="position:absolute;top:6949;left:81"><nobr>naive code, but somewhat slower than the best sequential code. We</nobr></div>
+<div style="position:absolute;top:6964;left:81"><nobr>are very pleased with the performance of this benchmark: the code</nobr></div>
+<div style="position:absolute;top:6979;left:81"><nobr>is written in a natural and idiomatic style, the GHC frontend fuses</nobr></div>
+<div style="position:absolute;top:6994;left:81"><nobr>away the intermediate data structures effectively, and our compiler</nobr></div>
+<div style="position:absolute;top:7009;left:81"><nobr>is able optimize and vectorize the key loops very effectively.</nobr></div>
+<div style="position:absolute;top:7024;left:99"><nobr>The speedup graph is given in Figure 2. All of the configurations</nobr></div>
+<div style="position:absolute;top:7039;left:81"><nobr>exhibit good scalability and are able to effectively all of the proces-</nobr></div>
+<div style="position:absolute;top:7054;left:81"><nobr>sors. However, since the optimized C version scales quite well and</nobr></div>
+<div style="position:absolute;top:7069;left:81"><nobr>is substantially faster at one processors, all of the configurations ex-</nobr></div>
+<div style="position:absolute;top:7084;left:81"><nobr>hibit a significant performance gap at 32 processors. The drop off</nobr></div>
+<div style="position:absolute;top:7099;left:81"><nobr>at 32 processors is repeatable, and likely reflects a weakness in our</nobr></div>
+<div style="position:absolute;top:7114;left:81"><nobr>support for parallel Haskell code, which is a recent addition. The</nobr></div>
+<div style="position:absolute;top:7128;left:81"><nobr>final result is an overall Haskell Gap of 1.43×.</nobr></div>
+<div style="position:absolute;top:7155;left:81"><nobr>3.1.2 Black Scholes</nobr></div>
+<div style="position:absolute;top:7176;left:81"><nobr>For the Black Scholes benchmark, we took measurements using a</nobr></div>
+<div style="position:absolute;top:7191;left:81"><nobr>range of configurations. The three primary C configurations are the</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:6263;left:550"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:6361;left:620"><nobr>0.16</nobr></div>
+<div style="position:absolute;top:6349;left:690"><nobr>0.27</nobr></div>
+<div style="position:absolute;top:6354;left:760"><nobr>0.22</nobr></div>
+<div style="position:absolute;top:6387;left:510"><nobr>0</nobr></div>
+<div style="position:absolute;top:6364;left:504"><nobr>0.2</nobr></div>
+<div style="position:absolute;top:6341;left:504"><nobr>0.4</nobr></div>
+<div style="position:absolute;top:6318;left:504"><nobr>0.6</nobr></div>
+<div style="position:absolute;top:6295;left:504"><nobr>0.8</nobr></div>
+<div style="position:absolute;top:6272;left:510"><nobr>1</nobr></div>
+<div style="position:absolute;top:6248;left:504"><nobr>1.2</nobr></div>
+<div style="position:absolute;top:6398;left:544"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:6398;left:618"><nobr>C Opt</nobr></div>
+<div style="position:absolute;top:6398;left:685"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:6398;left:760"><nobr>HRC</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:6433;left:497"><nobr>Figure 1. 1D convolution run time normalized to C Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:5px;font-family:Times">
+<div style="position:absolute;top:6641;left:508"><nobr>0</nobr></div>
+<div style="position:absolute;top:6616;left:508"><nobr>5</nobr></div>
+<div style="position:absolute;top:6591;left:504"><nobr>10</nobr></div>
+<div style="position:absolute;top:6565;left:504"><nobr>15</nobr></div>
+<div style="position:absolute;top:6540;left:504"><nobr>20</nobr></div>
+<div style="position:absolute;top:6515;left:504"><nobr>25</nobr></div>
+<div style="position:absolute;top:6489;left:504"><nobr>30</nobr></div>
+<div style="position:absolute;top:6652;left:517"><nobr>0</nobr></div>
+<div style="position:absolute;top:6652;left:550"><nobr>5</nobr></div>
+<div style="position:absolute;top:6652;left:580"><nobr>10</nobr></div>
+<div style="position:absolute;top:6652;left:612"><nobr>15</nobr></div>
+<div style="position:absolute;top:6652;left:645"><nobr>20</nobr></div>
+<div style="position:absolute;top:6652;left:677"><nobr>25</nobr></div>
+<div style="position:absolute;top:6652;left:709"><nobr>30</nobr></div>
+<div style="position:absolute;top:6652;left:741"><nobr>35</nobr></div>
+<div style="position:absolute;top:6549;left:779"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:6564;left:779"><nobr>C Opt</nobr></div>
+<div style="position:absolute;top:6578;left:779"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:6592;left:779"><nobr>HRC</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:6680;left:491"><nobr>Figure 2. 1D convolution speedup relative to best sequential</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:5px;font-family:Times">
+<div style="position:absolute;top:6833;left:532"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:6855;left:567"><nobr>0.32</nobr></div>
+<div style="position:absolute;top:6837;left:602"><nobr>0.87</nobr></div>
+<div style="position:absolute;top:6860;left:637"><nobr>0.19</nobr></div>
+<div style="position:absolute;top:6855;left:672"><nobr>0.32</nobr></div>
+<div style="position:absolute;top:6834;left:708"><nobr>0.97</nobr></div>
+<div style="position:absolute;top:6740;left:743"><nobr>3.94</nobr></div>
+<div style="position:absolute;top:6745;left:778"><nobr>3.69</nobr></div>
+<div style="position:absolute;top:6874;left:510"><nobr>0</nobr></div>
+<div style="position:absolute;top:6857;left:504"><nobr>0.5</nobr></div>
+<div style="position:absolute;top:6841;left:510"><nobr>1</nobr></div>
+<div style="position:absolute;top:6825;left:504"><nobr>1.5</nobr></div>
+<div style="position:absolute;top:6808;left:510"><nobr>2</nobr></div>
+<div style="position:absolute;top:6792;left:504"><nobr>2.5</nobr></div>
+<div style="position:absolute;top:6775;left:510"><nobr>3</nobr></div>
+<div style="position:absolute;top:6759;left:504"><nobr>3.5</nobr></div>
+<div style="position:absolute;top:6742;left:510"><nobr>4</nobr></div>
+<div style="position:absolute;top:6884;left:527"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:6894;left:525"><nobr>NOSIMD</nobr></div>
+<div style="position:absolute;top:6884;left:562"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:6884;left:600"><nobr>C Opt</nobr></div>
+<div style="position:absolute;top:6894;left:595"><nobr>NOSIMD</nobr></div>
+<div style="position:absolute;top:6884;left:635"><nobr>C Opt</nobr></div>
+<div style="position:absolute;top:6884;left:668"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:6884;left:708"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:6884;left:743"><nobr>GHC</nobr></div>
+<div style="position:absolute;top:6884;left:768"><nobr>GHC LLVM</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:6928;left:501"><nobr>Figure 3. Black Scholes run time normalized to C Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:5px;font-family:Times">
+<div style="position:absolute;top:7132;left:504"><nobr>0</nobr></div>
+<div style="position:absolute;top:7112;left:504"><nobr>1</nobr></div>
+<div style="position:absolute;top:7091;left:504"><nobr>2</nobr></div>
+<div style="position:absolute;top:7070;left:504"><nobr>3</nobr></div>
+<div style="position:absolute;top:7050;left:504"><nobr>4</nobr></div>
+<div style="position:absolute;top:7029;left:504"><nobr>5</nobr></div>
+<div style="position:absolute;top:7009;left:504"><nobr>6</nobr></div>
+<div style="position:absolute;top:6988;left:504"><nobr>7</nobr></div>
+<div style="position:absolute;top:7142;left:513"><nobr>0</nobr></div>
+<div style="position:absolute;top:7142;left:545"><nobr>5</nobr></div>
+<div style="position:absolute;top:7142;left:575"><nobr>10</nobr></div>
+<div style="position:absolute;top:7142;left:606"><nobr>15</nobr></div>
+<div style="position:absolute;top:7142;left:638"><nobr>20</nobr></div>
+<div style="position:absolute;top:7142;left:670"><nobr>25</nobr></div>
+<div style="position:absolute;top:7142;left:702"><nobr>30</nobr></div>
+<div style="position:absolute;top:7142;left:733"><nobr>35</nobr></div>
+<div style="position:absolute;top:7030;left:770"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:7044;left:770"><nobr>C Opt</nobr></div>
+<div style="position:absolute;top:7058;left:770"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:7073;left:770"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:7087;left:770"><nobr>GHC</nobr></div>
+<div style="position:absolute;top:7101;left:770"><nobr>GHC LLVM</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:7175;left:494"><nobr>Figure 4. Black Scholes speedup relative to best sequential</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:7238;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:7238;left:445"><nobr>6</nobr></div>
+<div style="position:absolute;top:7238;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:7303;left:0"><hr></div><font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:7414;left:81"><nobr>naive C configuration, the optimized C configuration, and the ninja</nobr></div>
+<div style="position:absolute;top:7429;left:81"><nobr>(AVX) configuration. Since the C compiler was unable to (or chose</nobr></div>
+<div style="position:absolute;top:7444;left:81"><nobr>not to) perform auto-vectorization, each of the first two configu-</nobr></div>
+<div style="position:absolute;top:7459;left:81"><nobr>rations was measured with and without the use of a simd pragma.</nobr></div>
+<div style="position:absolute;top:7474;left:81"><nobr>Hence the “C Naive NOSIMD” configuration is the C Naive code</nobr></div>
+<div style="position:absolute;top:7489;left:81"><nobr>without a simd pragma, whereas the “C Naive” configuration is the</nobr></div>
+<div style="position:absolute;top:7504;left:81"><nobr>C Naive code with a simd pragma on the inner loop, and similarly</nobr></div>
+<div style="position:absolute;top:7518;left:81"><nobr>for the optimized C configuration. The ninja configuration uses</nobr></div>
+<div style="position:absolute;top:7533;left:81"><nobr>AVX intrinsics. We also present measurements for the Haskell code</nobr></div>
+<div style="position:absolute;top:7548;left:81"><nobr>compiled both with our compiler (HRC) and the GHC compiler</nobr></div>
+<div style="position:absolute;top:7563;left:81"><nobr>(GHC, GHC LLVM). The benchmarks were run on 40,000,000 op-</nobr></div>
+<div style="position:absolute;top:7578;left:81"><nobr>tions.</nobr></div>
+<div style="position:absolute;top:7593;left:99"><nobr>The relative sequential performance is given in Figure 3. The</nobr></div>
+<div style="position:absolute;top:7608;left:81"><nobr>optimized C code (SIMD) runs in 60% of the time of the naive</nobr></div>
+<div style="position:absolute;top:7623;left:81"><nobr>(SIMD), outperforming the Ninja code by a similar margin, again</nobr></div>
+<div style="position:absolute;top:7638;left:81"><nobr>possibly reflecting changes in architectures of compiler improve-</nobr></div>
+<div style="position:absolute;top:7653;left:81"><nobr>ments.</nobr></div>
+<div style="position:absolute;top:7668;left:99"><nobr>The Haskell code with our compiler runs slightly faster than the</nobr></div>
+<div style="position:absolute;top:7683;left:81"><nobr>naive C code, but is a factor of 5.1× slower than the optimized C</nobr></div>
+<div style="position:absolute;top:7698;left:81"><nobr>code. The GHC LLVM compiled code is slower than the naive C</nobr></div>
+<div style="position:absolute;top:7713;left:81"><nobr>code by a factor of 3.7×, and is slower than the optimized C SIMD</nobr></div>
+<div style="position:absolute;top:7728;left:81"><nobr>code by almost a factor of 10×.</nobr></div>
+<div style="position:absolute;top:7743;left:99"><nobr>Figure 4 shows the speedup of the main configurations relative</nobr></div>
+<div style="position:absolute;top:7758;left:81"><nobr>to the best sequential version (the Ninja AVX code). We leave off</nobr></div>
+<div style="position:absolute;top:7772;left:81"><nobr>the non-SIMD C configurations to avoid cluttering the chart - their</nobr></div>
+<div style="position:absolute;top:7787;left:81"><nobr>scalability essentially mirrors that of the SIMD versions. The scal-</nobr></div>
+<div style="position:absolute;top:7802;left:81"><nobr>ability results for this benchmark are significantly mixed. The ninja</nobr></div>
+<div style="position:absolute;top:7817;left:81"><nobr>code scales reasonably well up to 8 or 9 processors, and then flat-</nobr></div>
+<div style="position:absolute;top:7832;left:81"><nobr>tens out. It is likely based on our preliminary investigations that this</nobr></div>
+<div style="position:absolute;top:7847;left:81"><nobr>is related to migration of data between sockets. The server machine</nobr></div>
+<div style="position:absolute;top:7862;left:81"><nobr>on which these measurements were taken contains 4 separate phys-</nobr></div>
+<div style="position:absolute;top:7877;left:81"><nobr>ical processors, each with 8 cores. The phase transition at 8 threads</nobr></div>
+<div style="position:absolute;top:7892;left:81"><nobr>is suggestive, but not definitive.</nobr></div>
+<div style="position:absolute;top:7907;left:99"><nobr>Interestingly, the Haskell programs for this benchmark scale</nobr></div>
+<div style="position:absolute;top:7922;left:81"><nobr>relatively well. The GHC compiled code scales cleanly, but can-</nobr></div>
+<div style="position:absolute;top:7937;left:81"><nobr>not overcome the sequential performance deficit, resulting in a fi-</nobr></div>
+<div style="position:absolute;top:7952;left:81"><nobr>nal Haskell Gap of 4.55×. The code compiled with our compiler</nobr></div>
+<div style="position:absolute;top:7967;left:81"><nobr>comes surprisingly close to matching the peak performance of the</nobr></div>
+<div style="position:absolute;top:7982;left:81"><nobr>optimized code, albeit using 4 times as many processors. The final</nobr></div>
+<div style="position:absolute;top:7997;left:81"><nobr>Haskell Gap for the HRC code is 1.4×.</nobr></div>
+<div style="position:absolute;top:8029;left:81"><nobr>3.1.3 2D Convolution</nobr></div>
+<div style="position:absolute;top:8050;left:81"><nobr>For the 2D convolution benchmark, we were only able to recon-</nobr></div>
+<div style="position:absolute;top:8065;left:81"><nobr>struct naive C and ninja C versions of the code, the latter using</nobr></div>
+<div style="position:absolute;top:8080;left:81"><nobr>AVX intrinsics. We also measured the Haskell code compiled with</nobr></div>
+<div style="position:absolute;top:8095;left:81"><nobr>both the Intel compiler and the GHC compiler. All measurements</nobr></div>
+<div style="position:absolute;top:8110;left:81"><nobr>were taken by convolving a 4000 by 4000 image repeatedly for 32</nobr></div>
+<div style="position:absolute;top:8125;left:81"><nobr>iterations.</nobr></div>
+<div style="position:absolute;top:8140;left:99"><nobr>The relative sequential performance is given in Figure 5. The</nobr></div>
+<div style="position:absolute;top:8155;left:81"><nobr>ninja code is substantially faster than the naive C code as is to</nobr></div>
+<div style="position:absolute;top:8170;left:81"><nobr>be expected given the lack of vectorization. The GHC compiled</nobr></div>
+<div style="position:absolute;top:8185;left:81"><nobr>Haskell code is almost 2.7× slower than the naive C code and</nobr></div>
+<div style="position:absolute;top:8200;left:81"><nobr>hence almost 20× slower than the ninja code. The GHC LLVM</nobr></div>
+<div style="position:absolute;top:8215;left:81"><nobr>backend gives substantial benefit on this benchmark, exhibiting</nobr></div>
+<div style="position:absolute;top:8230;left:81"><nobr>only a 1.51x slowdown over the naive C, or a 11× slowdown</nobr></div>
+<div style="position:absolute;top:8245;left:81"><nobr>over the ninja C. However, the Intel compiled Haskell code is</nobr></div>
+<div style="position:absolute;top:8260;left:81"><nobr>substantially faster than the naive C code, and only around 1.9×</nobr></div>
+<div style="position:absolute;top:8275;left:81"><nobr>slower than the ninja code. The original ninja gap paper reported</nobr></div>
+<div style="position:absolute;top:8290;left:81"><nobr>reaching within 1.3X of the ninja code with their optimized C</nobr></div>
+<div style="position:absolute;top:8304;left:81"><nobr>code [9].</nobr></div>
+<div style="position:absolute;top:8319;left:99"><nobr>Figure 6 shows the parallel speedup of the various configu-</nobr></div>
+<div style="position:absolute;top:8334;left:81"><nobr>rations relative to the sequential performance of the ninja con-</nobr></div>
+<div style="position:absolute;top:8349;left:81"><nobr>figuration. The ninja code scales well up to 9 or 10 processors,</nobr></div>
+<div style="position:absolute;top:8364;left:81"><nobr>again suggestive of issues arising with the multi-socket architec-</nobr></div>
+<div style="position:absolute;top:8379;left:81"><nobr>ture. However, none of the other configurations is able to make up</nobr></div>
+<div style="position:absolute;top:7414;left:476"><nobr>the substantial head-start provided by the significantly better se-</nobr></div>
+<div style="position:absolute;top:7429;left:476"><nobr>quential performance. The GHC compiled code remains the slow-</nobr></div>
+<div style="position:absolute;top:7444;left:476"><nobr>est throughout the full range, with a final Haskell Gap of 6.01×.</nobr></div>
+<div style="position:absolute;top:7459;left:476"><nobr>The Intel compiled Haskell code suffers a somewhat similar trajec-</nobr></div>
+<div style="position:absolute;top:7474;left:476"><nobr>tory to the ninja code, flattening out and even dropping a bit after</nobr></div>
+<div style="position:absolute;top:7489;left:476"><nobr>10 processors. Interestingly, the naive C code scales quite cleanly,</nobr></div>
+<div style="position:absolute;top:7504;left:476"><nobr>and eventually beats the best performance of the Haskell code by</nobr></div>
+<div style="position:absolute;top:7518;left:476"><nobr>making better use of higher number of cores. The final Haskell Gap</nobr></div>
+<div style="position:absolute;top:7533;left:476"><nobr>for the HRC compiled code is 3.29×.</nobr></div>
+<div style="position:absolute;top:7562;left:476"><nobr>3.1.4 N Body</nobr></div>
+<div style="position:absolute;top:7583;left:476"><nobr>For the N Body benchmark, we measure six different configura-</nobr></div>
+<div style="position:absolute;top:7598;left:476"><nobr>tions. The C versions include a naive C version, an optimized C</nobr></div>
+<div style="position:absolute;top:7613;left:476"><nobr>version (hand unrolled), and a ninja C version written using AVX</nobr></div>
+<div style="position:absolute;top:7628;left:476"><nobr>intrinsics. We measure the Haskell code as compiled with HRC,</nobr></div>
+<div style="position:absolute;top:7642;left:476"><nobr>and with GHC and GHC LLVM. The blocking version of the C</nobr></div>
+<div style="position:absolute;top:7657;left:476"><nobr>code that we implemented showed no additional performance or</nobr></div>
+<div style="position:absolute;top:7672;left:476"><nobr>scalability on this architecture, and so we elide those results. The</nobr></div>
+<div style="position:absolute;top:7687;left:476"><nobr>benchmarks were run simulating 150,000 bodies.</nobr></div>
+<div style="position:absolute;top:7702;left:493"><nobr>The relative sequential performance is given in Figure 7. The C</nobr></div>
+<div style="position:absolute;top:7717;left:476"><nobr>compiler is able to do an excellent job of vectorizing and optimiz-</nobr></div>
+<div style="position:absolute;top:7732;left:476"><nobr>ing this benchmark. The optimized C version run in approximately</nobr></div>
+<div style="position:absolute;top:7747;left:476"><nobr>13% of the time of the naive C versions, and is only 19% slower</nobr></div>
+<div style="position:absolute;top:7762;left:476"><nobr>than the ninja code. The GHC compiled code is slower than the</nobr></div>
+<div style="position:absolute;top:7777;left:476"><nobr>naive C code by a factor of 3.37×, and is 31× slower than the</nobr></div>
+<div style="position:absolute;top:7792;left:476"><nobr>ninja code. The GHC LLVM code is only 1.37× slower than the</nobr></div>
+<div style="position:absolute;top:7807;left:476"><nobr>naive code, or 12.5× slower than the ninja code.</nobr></div>
+<div style="position:absolute;top:7822;left:493"><nobr>HRC produces code that is significantly faster than the naive</nobr></div>
+<div style="position:absolute;top:7837;left:476"><nobr>C code, primarily because of its ability to vectorize the code. It</nobr></div>
+<div style="position:absolute;top:7852;left:476"><nobr>remains a factor of 2.6× slower than the optimized C versions</nobr></div>
+<div style="position:absolute;top:7867;left:476"><nobr>however, due to the C compiler’s ability to eliminate the division</nobr></div>
+<div style="position:absolute;top:7882;left:476"><nobr>and square root instructions from the inner loop as discussed in</nobr></div>
+<div style="position:absolute;top:7897;left:476"><nobr>Section 2. On the one hand, this is a disappointing result in that</nobr></div>
+<div style="position:absolute;top:7911;left:476"><nobr>there is a substantial gap between the Haskell code and the C</nobr></div>
+<div style="position:absolute;top:7926;left:476"><nobr>code. However, we find it encouraging that Haskell code can be</nobr></div>
+<div style="position:absolute;top:7941;left:476"><nobr>optimized to the point that machine level peephole optimizations</nobr></div>
+<div style="position:absolute;top:7956;left:476"><nobr>can make this substantial a difference.</nobr></div>
+<div style="position:absolute;top:7971;left:493"><nobr>It is worth emphasizing here that the relative performance here</nobr></div>
+<div style="position:absolute;top:7986;left:476"><nobr>is highly dependent not just on the choice of compilers and algo-</nobr></div>
+<div style="position:absolute;top:8001;left:476"><nobr>rithms, but even on the flags passed to the compiler. Passing options</nobr></div>
+<div style="position:absolute;top:8016;left:476"><nobr>requiring the C compiler to maintain the source level precision of</nobr></div>
+<div style="position:absolute;top:8031;left:476"><nobr>the division and square root operations results in this optimization</nobr></div>
+<div style="position:absolute;top:8046;left:476"><nobr>being disabled, reducing the performance of the optimized C code</nobr></div>
+<div style="position:absolute;top:8061;left:476"><nobr>to almost exactly that of the Intel compiled Haskell code. More-</nobr></div>
+<div style="position:absolute;top:8076;left:476"><nobr>over, in order to vectorize the code both the C compiler and HRC</nobr></div>
+<div style="position:absolute;top:8091;left:476"><nobr>must re-associate floating point operations which does not preserve</nobr></div>
+<div style="position:absolute;top:8106;left:476"><nobr>source level semantics. Consequently, forcing fully strict floating</nobr></div>
+<div style="position:absolute;top:8121;left:476"><nobr>point semantics reduces performance even further for both the C</nobr></div>
+<div style="position:absolute;top:8136;left:476"><nobr>and the Haskell code.</nobr></div>
+<div style="position:absolute;top:8151;left:493"><nobr>Figure 8 shows the speedup of all of the configurations relative</nobr></div>
+<div style="position:absolute;top:8166;left:476"><nobr>to the ninja sequential performance. All of the benchmarks scale</nobr></div>
+<div style="position:absolute;top:8180;left:476"><nobr>extremely well, and maintain approximately the same relative per-</nobr></div>
+<div style="position:absolute;top:8195;left:476"><nobr>formance throughout the full range of processor counts. The final</nobr></div>
+<div style="position:absolute;top:8210;left:476"><nobr>Haskell Gap for GHC LLVM is 12.5×, and for HRC is 2.67×.</nobr></div>
+<div style="position:absolute;top:8239;left:476"><nobr>3.1.5 TreeSearch</nobr></div>
+<div style="position:absolute;top:8260;left:476"><nobr>For the TreeSearch benchmark, we measure five different config-</nobr></div>
+<div style="position:absolute;top:8275;left:476"><nobr>urations: a naive C version, a specialized and optimized C version</nobr></div>
+<div style="position:absolute;top:8290;left:476"><nobr>with loop unrolling, an optimized C version specialized to depth</nobr></div>
+<div style="position:absolute;top:8304;left:476"><nobr>24 trees only (C Fixed), a ninja C version with SIMD blocking and</nobr></div>
+<div style="position:absolute;top:8319;left:476"><nobr>pipelining, and a Haskell version compiled with HRC. We were un-</nobr></div>
+<div style="position:absolute;top:8334;left:476"><nobr>able to run GHC on a sufficiently large problem size, and so we do</nobr></div>
+<div style="position:absolute;top:8349;left:476"><nobr>not report results for it (but discuss its performance separately on</nobr></div>
+<div style="position:absolute;top:8364;left:476"><nobr>smaller problem sizes). All remaining configurations were run with</nobr></div>
+<div style="position:absolute;top:8379;left:476"><nobr>95 million queries over a binary tree of depth 24.</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:8426;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:8426;left:445"><nobr>7</nobr></div>
+<div style="position:absolute;top:8426;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:8491;left:0"><hr></div><font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:8709;left:148"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:8749;left:204"><nobr>0.14</nobr></div>
+<div style="position:absolute;top:8743;left:260"><nobr>0.26</nobr></div>
+<div style="position:absolute;top:8632;left:316"><nobr>2.66</nobr></div>
+<div style="position:absolute;top:8685;left:373"><nobr>1.51</nobr></div>
+<div style="position:absolute;top:8763;left:116"><nobr>0</nobr></div>
+<div style="position:absolute;top:8740;left:110"><nobr>0.5</nobr></div>
+<div style="position:absolute;top:8717;left:116"><nobr>1</nobr></div>
+<div style="position:absolute;top:8694;left:110"><nobr>1.5</nobr></div>
+<div style="position:absolute;top:8671;left:116"><nobr>2</nobr></div>
+<div style="position:absolute;top:8648;left:110"><nobr>2.5</nobr></div>
+<div style="position:absolute;top:8624;left:116"><nobr>3</nobr></div>
+<div style="position:absolute;top:8774;left:143"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:8774;left:200"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:8774;left:261"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:8774;left:316"><nobr>GHC</nobr></div>
+<div style="position:absolute;top:8774;left:362"><nobr>GHC LLVM</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:8809;left:103"><nobr>Figure 5. 2D convolution run time normalized to C Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:9011;left:109"><nobr>0</nobr></div>
+<div style="position:absolute;top:8993;left:109"><nobr>1</nobr></div>
+<div style="position:absolute;top:8976;left:109"><nobr>2</nobr></div>
+<div style="position:absolute;top:8958;left:109"><nobr>3</nobr></div>
+<div style="position:absolute;top:8941;left:109"><nobr>4</nobr></div>
+<div style="position:absolute;top:8924;left:109"><nobr>5</nobr></div>
+<div style="position:absolute;top:8906;left:109"><nobr>6</nobr></div>
+<div style="position:absolute;top:8889;left:109"><nobr>7</nobr></div>
+<div style="position:absolute;top:8872;left:109"><nobr>8</nobr></div>
+<div style="position:absolute;top:9021;left:119"><nobr>0</nobr></div>
+<div style="position:absolute;top:9021;left:150"><nobr>5</nobr></div>
+<div style="position:absolute;top:9021;left:180"><nobr>10</nobr></div>
+<div style="position:absolute;top:9021;left:211"><nobr>15</nobr></div>
+<div style="position:absolute;top:9021;left:242"><nobr>20</nobr></div>
+<div style="position:absolute;top:9021;left:273"><nobr>25</nobr></div>
+<div style="position:absolute;top:9021;left:305"><nobr>30</nobr></div>
+<div style="position:absolute;top:9021;left:336"><nobr>35</nobr></div>
+<div style="position:absolute;top:8917;left:374"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:8932;left:374"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:8947;left:374"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:8961;left:374"><nobr>GHC</nobr></div>
+<div style="position:absolute;top:8976;left:374"><nobr>GHC LLVM</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:9056;left:96"><nobr>Figure 6. 2D convolution speedup relative to best sequential</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:9209;left:143"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:9239;left:190"><nobr>0.13</nobr></div>
+<div style="position:absolute;top:9240;left:237"><nobr>0.11</nobr></div>
+<div style="position:absolute;top:9234;left:284"><nobr>0.29</nobr></div>
+<div style="position:absolute;top:9126;left:330"><nobr>3.37</nobr></div>
+<div style="position:absolute;top:9196;left:377"><nobr>1.37</nobr></div>
+<div style="position:absolute;top:9252;left:116"><nobr>0</nobr></div>
+<div style="position:absolute;top:9234;left:109"><nobr>0.5</nobr></div>
+<div style="position:absolute;top:9217;left:116"><nobr>1</nobr></div>
+<div style="position:absolute;top:9200;left:109"><nobr>1.5</nobr></div>
+<div style="position:absolute;top:9182;left:116"><nobr>2</nobr></div>
+<div style="position:absolute;top:9165;left:109"><nobr>2.5</nobr></div>
+<div style="position:absolute;top:9147;left:116"><nobr>3</nobr></div>
+<div style="position:absolute;top:9130;left:109"><nobr>3.5</nobr></div>
+<div style="position:absolute;top:9112;left:116"><nobr>4</nobr></div>
+<div style="position:absolute;top:9262;left:138"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:9262;left:188"><nobr>C Opt</nobr></div>
+<div style="position:absolute;top:9262;left:232"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:9262;left:284"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:9262;left:330"><nobr>GHC</nobr></div>
+<div style="position:absolute;top:9262;left:367"><nobr>GHC LLVM</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:9303;left:125"><nobr>Figure 7. N body run time normalized to C Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:9505;left:114"><nobr>0</nobr></div>
+<div style="position:absolute;top:9482;left:114"><nobr>5</nobr></div>
+<div style="position:absolute;top:9459;left:109"><nobr>10</nobr></div>
+<div style="position:absolute;top:9436;left:109"><nobr>15</nobr></div>
+<div style="position:absolute;top:9413;left:109"><nobr>20</nobr></div>
+<div style="position:absolute;top:9390;left:109"><nobr>25</nobr></div>
+<div style="position:absolute;top:9366;left:109"><nobr>30</nobr></div>
+<div style="position:absolute;top:9516;left:123"><nobr>0</nobr></div>
+<div style="position:absolute;top:9516;left:154"><nobr>5</nobr></div>
+<div style="position:absolute;top:9516;left:182"><nobr>10</nobr></div>
+<div style="position:absolute;top:9516;left:213"><nobr>15</nobr></div>
+<div style="position:absolute;top:9516;left:244"><nobr>20</nobr></div>
+<div style="position:absolute;top:9516;left:275"><nobr>25</nobr></div>
+<div style="position:absolute;top:9516;left:305"><nobr>30</nobr></div>
+<div style="position:absolute;top:9516;left:336"><nobr>35</nobr></div>
+<div style="position:absolute;top:9405;left:374"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:9420;left:374"><nobr>C Opt</nobr></div>
+<div style="position:absolute;top:9434;left:374"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:9449;left:374"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:9463;left:374"><nobr>GHC</nobr></div>
+<div style="position:absolute;top:9478;left:374"><nobr>GHC LLVM</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:9551;left:117"><nobr>Figure 8. N Body speedup relative to best sequential</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:8696;left:543"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:8683;left:599"><nobr>1.32</nobr></div>
+<div style="position:absolute;top:8718;left:655"><nobr>0.45</nobr></div>
+<div style="position:absolute;top:8723;left:711"><nobr>0.33</nobr></div>
+<div style="position:absolute;top:8606;left:767"><nobr>3.26</nobr></div>
+<div style="position:absolute;top:8744;left:510"><nobr>0</nobr></div>
+<div style="position:absolute;top:8724;left:504"><nobr>0.5</nobr></div>
+<div style="position:absolute;top:8704;left:510"><nobr>1</nobr></div>
+<div style="position:absolute;top:8684;left:504"><nobr>1.5</nobr></div>
+<div style="position:absolute;top:8664;left:510"><nobr>2</nobr></div>
+<div style="position:absolute;top:8644;left:504"><nobr>2.5</nobr></div>
+<div style="position:absolute;top:8624;left:510"><nobr>3</nobr></div>
+<div style="position:absolute;top:8604;left:504"><nobr>3.5</nobr></div>
+<div style="position:absolute;top:8754;left:537"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:8754;left:597"><nobr>C Opt</nobr></div>
+<div style="position:absolute;top:8754;left:650"><nobr>C Fixed</nobr></div>
+<div style="position:absolute;top:8754;left:706"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:8754;left:767"><nobr>HRC</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:8796;left:509"><nobr>Figure 9. TreeSearch run time normalized to C Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:8979;left:508"><nobr>0</nobr></div>
+<div style="position:absolute;top:8951;left:508"><nobr>5</nobr></div>
+<div style="position:absolute;top:8923;left:504"><nobr>10</nobr></div>
+<div style="position:absolute;top:8895;left:504"><nobr>15</nobr></div>
+<div style="position:absolute;top:8867;left:504"><nobr>20</nobr></div>
+<div style="position:absolute;top:8839;left:504"><nobr>25</nobr></div>
+<div style="position:absolute;top:8989;left:518"><nobr>0</nobr></div>
+<div style="position:absolute;top:8989;left:550"><nobr>5</nobr></div>
+<div style="position:absolute;top:8989;left:580"><nobr>10</nobr></div>
+<div style="position:absolute;top:8989;left:612"><nobr>15</nobr></div>
+<div style="position:absolute;top:8989;left:644"><nobr>20</nobr></div>
+<div style="position:absolute;top:8989;left:676"><nobr>25</nobr></div>
+<div style="position:absolute;top:8989;left:708"><nobr>30</nobr></div>
+<div style="position:absolute;top:8989;left:740"><nobr>35</nobr></div>
+<div style="position:absolute;top:8886;left:778"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:8900;left:778"><nobr>C Opt</nobr></div>
+<div style="position:absolute;top:8915;left:778"><nobr>C Fixed</nobr></div>
+<div style="position:absolute;top:8929;left:778"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:8944;left:778"><nobr>HRC</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:9030;left:498"><nobr>Figure 10. TreeSearch speedup relative to best sequential</nobr></div>
+<div style="position:absolute;top:9072;left:493"><nobr>The relative sequential performance for these configurations</nobr></div>
+<div style="position:absolute;top:9087;left:476"><nobr>is given in Figure 9. For this code, the standard optimized C is</nobr></div>
+<div style="position:absolute;top:9101;left:476"><nobr>actually slower as compiled and measured on this architecture.</nobr></div>
+<div style="position:absolute;top:9116;left:476"><nobr>However, the version specialized for depth 24 runs in 45% of the</nobr></div>
+<div style="position:absolute;top:9131;left:476"><nobr>time of the naive version, and the ninja version runs in 33% of</nobr></div>
+<div style="position:absolute;top:9146;left:476"><nobr>naive. The Haskell code compiled with HRC is slower than the</nobr></div>
+<div style="position:absolute;top:9161;left:476"><nobr>naive C code by a factor of 3.26×.</nobr></div>
+<div style="position:absolute;top:9176;left:493"><nobr>Figure 10 shows the speedup of all of the configurations relative</nobr></div>
+<div style="position:absolute;top:9191;left:476"><nobr>to the naive C sequential performance. All versions of the C code</nobr></div>
+<div style="position:absolute;top:9206;left:476"><nobr>scale quite well, and so do the Haskell versions. The final Haskell</nobr></div>
+<div style="position:absolute;top:9221;left:476"><nobr>Gap for HRC is 15.4×.</nobr></div>
+<div style="position:absolute;top:9236;left:493"><nobr>We were unable to run GHC with 95 million queries, and for</nobr></div>
+<div style="position:absolute;top:9251;left:476"><nobr>smaller sizes the C code ran too quickly to measure scalability</nobr></div>
+<div style="position:absolute;top:9266;left:476"><nobr>effectively. Consequently we do not present GHC results here.</nobr></div>
+<div style="position:absolute;top:9281;left:476"><nobr>However, we separately measured GHC, GHC LLVM, HRC, and</nobr></div>
+<div style="position:absolute;top:9296;left:476"><nobr>the ninja C code run with 10 million queries. The smaller problem</nobr></div>
+<div style="position:absolute;top:9311;left:476"><nobr>size makes it difficult to effectively measure scaling for the ninja C,</nobr></div>
+<div style="position:absolute;top:9326;left:476"><nobr>to its detriment. Nonetheless, at 10M queries, we observe an overall</nobr></div>
+<div style="position:absolute;top:9341;left:476"><nobr>Haskell Gap of 10.5× for HRC at this problem size, and 272×</nobr></div>
+<div style="position:absolute;top:9356;left:476"><nobr>for GHC LLVM at this problem size. In subsequent discussion, we</nobr></div>
+<div style="position:absolute;top:9370;left:476"><nobr>use the Haskell Gap number for HRC at 95M queries, but use this</nobr></div>
+<div style="position:absolute;top:9385;left:476"><nobr>estimated Haskell Gap number for GHC.</nobr></div>
+<div style="position:absolute;top:9412;left:476"><nobr>3.1.6 Volume Rendering</nobr></div>
+<div style="position:absolute;top:9433;left:476"><nobr>For the Volume Rendering benchmark, we measure five different</nobr></div>
+<div style="position:absolute;top:9448;left:476"><nobr>configurations: a naive C version, a ninja version written with SSE</nobr></div>
+<div style="position:absolute;top:9463;left:476"><nobr>intrinsics, a Haskell version compiled with the HRC Compiler, and</nobr></div>
+<div style="position:absolute;top:9478;left:476"><nobr>the Haskell version compiled with GHC and GHC LLVM. All runs</nobr></div>
+<div style="position:absolute;top:9492;left:476"><nobr>were performed by rendering 1,000,000 voxels, repeating the com-</nobr></div>
+<div style="position:absolute;top:9507;left:476"><nobr>putation 1000 times. The requirement to repeat the computation is</nobr></div>
+<div style="position:absolute;top:9522;left:476"><nobr>somewhat unfortunate, not only because of the difficulties of ex-</nobr></div>
+<div style="position:absolute;top:9537;left:476"><nobr>pressing this effectively in Haskell, but also because of the difficul-</nobr></div>
+<div style="position:absolute;top:9552;left:476"><nobr>ties in preventing GHC and HRC from eliminating the unecessary</nobr></div>
+<div style="position:absolute;top:9567;left:476"><nobr>repetitions. Our initial implementation performed far better than</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:9614;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:9614;left:445"><nobr>8</nobr></div>
+<div style="position:absolute;top:9614;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:9679;left:0"><hr></div><font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:9890;left:148"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:9908;left:204"><nobr>0.56</nobr></div>
+<div style="position:absolute;top:9876;left:260"><nobr>1.36</nobr></div>
+<div style="position:absolute;top:9816;left:316"><nobr>2.88</nobr></div>
+<div style="position:absolute;top:9815;left:372"><nobr>2.89</nobr></div>
+<div style="position:absolute;top:9938;left:116"><nobr>0</nobr></div>
+<div style="position:absolute;top:9918;left:109"><nobr>0.5</nobr></div>
+<div style="position:absolute;top:9898;left:116"><nobr>1</nobr></div>
+<div style="position:absolute;top:9878;left:109"><nobr>1.5</nobr></div>
+<div style="position:absolute;top:9859;left:116"><nobr>2</nobr></div>
+<div style="position:absolute;top:9839;left:109"><nobr>2.5</nobr></div>
+<div style="position:absolute;top:9819;left:116"><nobr>3</nobr></div>
+<div style="position:absolute;top:9799;left:109"><nobr>3.5</nobr></div>
+<div style="position:absolute;top:9948;left:143"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:9948;left:200"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:9948;left:261"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:9948;left:316"><nobr>GHC</nobr></div>
+<div style="position:absolute;top:9948;left:362"><nobr>GHC LLVM</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:9984;left:91"><nobr>Figure 11. Volume Rendering run time normalized to C Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:10174;left:114"><nobr>0</nobr></div>
+<div style="position:absolute;top:10157;left:109"><nobr>10</nobr></div>
+<div style="position:absolute;top:10139;left:109"><nobr>20</nobr></div>
+<div style="position:absolute;top:10122;left:109"><nobr>30</nobr></div>
+<div style="position:absolute;top:10105;left:109"><nobr>40</nobr></div>
+<div style="position:absolute;top:10087;left:109"><nobr>50</nobr></div>
+<div style="position:absolute;top:10070;left:109"><nobr>60</nobr></div>
+<div style="position:absolute;top:10052;left:109"><nobr>70</nobr></div>
+<div style="position:absolute;top:10035;left:109"><nobr>80</nobr></div>
+<div style="position:absolute;top:10185;left:123"><nobr>0</nobr></div>
+<div style="position:absolute;top:10185;left:154"><nobr>5</nobr></div>
+<div style="position:absolute;top:10185;left:182"><nobr>10</nobr></div>
+<div style="position:absolute;top:10185;left:213"><nobr>15</nobr></div>
+<div style="position:absolute;top:10185;left:244"><nobr>20</nobr></div>
+<div style="position:absolute;top:10185;left:275"><nobr>25</nobr></div>
+<div style="position:absolute;top:10185;left:305"><nobr>30</nobr></div>
+<div style="position:absolute;top:10185;left:336"><nobr>35</nobr></div>
+<div style="position:absolute;top:10081;left:374"><nobr>C Naive</nobr></div>
+<div style="position:absolute;top:10096;left:374"><nobr>C Ninja</nobr></div>
+<div style="position:absolute;top:10110;left:374"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:10125;left:374"><nobr>GHC</nobr></div>
+<div style="position:absolute;top:10139;left:374"><nobr>GHC LLVM</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:10220;left:84"><nobr>Figure 12. Volume Rendering speedup relative to best sequential</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:10351;left:149"><nobr>1.43</nobr></div>
+<div style="position:absolute;top:10351;left:184"><nobr>1.40</nobr></div>
+<div style="position:absolute;top:10339;left:219"><nobr>3.29</nobr></div>
+<div style="position:absolute;top:10342;left:255"><nobr>2.67</nobr></div>
+<div style="position:absolute;top:10317;left:288"><nobr>15.37</nobr></div>
+<div style="position:absolute;top:10341;left:325"><nobr>2.79</nobr></div>
+<div style="position:absolute;top:10334;left:194"><nobr>4.55</nobr></div>
+<div style="position:absolute;top:10330;left:229"><nobr>6.01</nobr></div>
+<div style="position:absolute;top:10320;left:263"><nobr>12.45</nobr></div>
+<div style="position:absolute;top:10275;left:296"><nobr>271.70</nobr></div>
+<div style="position:absolute;top:10327;left:335"><nobr>7.30</nobr></div>
+<div style="position:absolute;top:10364;left:122"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:10331;left:118"><nobr>10.00</nobr></div>
+<div style="position:absolute;top:10298;left:114"><nobr>100.00</nobr></div>
+<div style="position:absolute;top:10265;left:110"><nobr>1000.00</nobr></div>
+<div style="position:absolute;top:10333;left:374"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:10347;left:374"><nobr>GHC LLVM</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:10456;left:129"><nobr>Figure 13. The Haskell Gap on CPU (log scale)</nobr></div>
+<div style="position:absolute;top:10498;left:81"><nobr>any C version—but only because it was able to remove the redun-</nobr></div>
+<div style="position:absolute;top:10513;left:81"><nobr>dant main calculation from the iteration loop. Working around this</nobr></div>
+<div style="position:absolute;top:10528;left:81"><nobr>is a finicky process, and where possible we have avoided using it-</nobr></div>
+<div style="position:absolute;top:10543;left:81"><nobr>eration in the benchmarks.</nobr></div>
+<div style="position:absolute;top:10558;left:99"><nobr>The relative sequential performance for these configurations is</nobr></div>
+<div style="position:absolute;top:10573;left:81"><nobr>given in Figure 11. The ninja code runs in 56% of the time of the</nobr></div>
+<div style="position:absolute;top:10588;left:81"><nobr>naive C code. The GHC compiled Haskell code takes a factor of</nobr></div>
+<div style="position:absolute;top:10602;left:81"><nobr>2.88× times slower than the naive C code. The HRC compiled code</nobr></div>
+<div style="position:absolute;top:10618;left:81"><nobr>runs 1.36× slower than the naive C.</nobr></div>
+<div style="position:absolute;top:10632;left:99"><nobr>The speedup of all of the configurations relative to the ninja</nobr></div>
+<div style="position:absolute;top:10647;left:81"><nobr>code is given in Figure 12. All configurations scale very well,</nobr></div>
+<div style="position:absolute;top:10662;left:81"><nobr>except again for the HRC drop off at 32 processors reflecting a</nobr></div>
+<div style="position:absolute;top:10677;left:81"><nobr>likely weakness in our threading runtime. The final Haskell Gap</nobr></div>
+<div style="position:absolute;top:10692;left:81"><nobr>for this benchmark is 2.79× for HRC, and 7.25× for GHC.</nobr></div>
+<div style="position:absolute;top:10719;left:81"><nobr>3.1.7 The CPU Haskell Gap</nobr></div>
+<div style="position:absolute;top:10740;left:81"><nobr>Figure 13 summarizes the Haskell Gap for these benchmarks, us-</nobr></div>
+<div style="position:absolute;top:10755;left:81"><nobr>ing HRC and GHC with the LLVM backend. For 1D convolution,</nobr></div>
+<div style="position:absolute;top:9790;left:476"><nobr>we do not present GHC numbers, and for TreeSearch the GHC</nobr></div>
+<div style="position:absolute;top:9805;left:476"><nobr>numbers are for a smaller problem size than for the HRC numbers</nobr></div>
+<div style="position:absolute;top:9820;left:476"><nobr>(and hence if anything almost certainly understate the gap). Our use</nobr></div>
+<div style="position:absolute;top:9835;left:476"><nobr>of the Haskell Gap measurement in these benchmarks is intended</nobr></div>
+<div style="position:absolute;top:9850;left:476"><nobr>to capture the overall potential peak performance achievable us-</nobr></div>
+<div style="position:absolute;top:9865;left:476"><nobr>ing Haskell, relative to well optimized C versions, accounting for</nobr></div>
+<div style="position:absolute;top:9880;left:476"><nobr>both sequential performance, SIMD parallelism, and thread paral-</nobr></div>
+<div style="position:absolute;top:9894;left:476"><nobr>lelism. We believe that this emphasizes the point that achieving</nobr></div>
+<div style="position:absolute;top:9909;left:476"><nobr>performance parity with low-level languages necessarily requires</nobr></div>
+<div style="position:absolute;top:9924;left:476"><nobr>both good sequential performance and good scalability. For cer-</nobr></div>
+<div style="position:absolute;top:9939;left:476"><nobr>tain of these benchmarks, generally ones in which we are able to</nobr></div>
+<div style="position:absolute;top:9954;left:476"><nobr>effectively leverage SIMD parallelism and provide good baseline</nobr></div>
+<div style="position:absolute;top:9969;left:476"><nobr>sequential performance, the Haskell Gap is encouragingly small.</nobr></div>
+<div style="position:absolute;top:9984;left:476"><nobr>For others however, the gap remains wide.</nobr></div>
+<div style="position:absolute;top:10011;left:476"><nobr>3.2 Xeon Phi Performance</nobr></div>
+<div style="position:absolute;top:10032;left:476"><nobr>We have also measured a subset of the benchmarks on a Xeon</nobr></div>
+<div style="position:absolute;top:10047;left:476"><nobr>Phi 57 core co-processor. The board we have access to is not a</nobr></div>
+<div style="position:absolute;top:10062;left:476"><nobr>final production chip, and may have additional idiosyncracies in</nobr></div>
+<div style="position:absolute;top:10077;left:476"><nobr>addition to the odd core count. Our support for the Xeon Phi is very</nobr></div>
+<div style="position:absolute;top:10092;left:476"><nobr>preliminary and very little performance tuning has been performed.</nobr></div>
+<div style="position:absolute;top:10107;left:476"><nobr>The vector support in particular is a very recent addition, and</nobr></div>
+<div style="position:absolute;top:10122;left:476"><nobr>contains a number of performance compromises for the sake of</nobr></div>
+<div style="position:absolute;top:10137;left:476"><nobr>achieving initial functionality. Nonetheless, we believe that these</nobr></div>
+<div style="position:absolute;top:10151;left:476"><nobr>numbers are interesting, measuring as they do the scalability of a</nobr></div>
+<div style="position:absolute;top:10166;left:476"><nobr>Haskell implementation on a machine with a very large number</nobr></div>
+<div style="position:absolute;top:10181;left:476"><nobr>of cores. To the best of our knowledge, these are the first Haskell</nobr></div>
+<div style="position:absolute;top:10196;left:476"><nobr>performance numbers reported for the Xeon Phi. There is no GHC</nobr></div>
+<div style="position:absolute;top:10211;left:476"><nobr>version available targeting Xeon Phi, and so we report Haskell</nobr></div>
+<div style="position:absolute;top:10226;left:476"><nobr>numbers using HRC only.</nobr></div>
+<div style="position:absolute;top:10253;left:476"><nobr>3.2.1 1D Convolution</nobr></div>
+<div style="position:absolute;top:10274;left:476"><nobr>For the 1D convolution benchmark, the naive and optimized C</nobr></div>
+<div style="position:absolute;top:10289;left:476"><nobr>configurations were compiled for the Xeon Phi. Since the ninja</nobr></div>
+<div style="position:absolute;top:10304;left:476"><nobr>code uses AVX intrinsics, it is not portable to the Xeon Phi which</nobr></div>
+<div style="position:absolute;top:10319;left:476"><nobr>uses a different vector ISA. In addition to the C configurations, we</nobr></div>
+<div style="position:absolute;top:10334;left:476"><nobr>present measurements for Haskell code compiled by HRC with our</nobr></div>
+<div style="position:absolute;top:10349;left:476"><nobr>vectorization pass turned on (HRC SIMD) and off (HRC).</nobr></div>
+<div style="position:absolute;top:10364;left:493"><nobr>Figure 14 shows the sequential runtime relative to the C Naive</nobr></div>
+<div style="position:absolute;top:10379;left:476"><nobr>configuration. The optimized C configuration is able to take good</nobr></div>
+<div style="position:absolute;top:10394;left:476"><nobr>advantage of the wide vector instruction set, running in 29% of the</nobr></div>
+<div style="position:absolute;top:10409;left:476"><nobr>time of the naive C configuration. Surprisingly, the Haskell code is</nobr></div>
+<div style="position:absolute;top:10423;left:476"><nobr>substantially slower than the naive C code on this platform, running</nobr></div>
+<div style="position:absolute;top:10438;left:476"><nobr>in 4.75× the time. The addition of SIMD vectorization partially</nobr></div>
+<div style="position:absolute;top:10453;left:476"><nobr>ameliorates this, but an almost 1.4× gap remains. We have not yet</nobr></div>
+<div style="position:absolute;top:10468;left:476"><nobr>investigated why the non-vector performance is slow, nor why the</nobr></div>
+<div style="position:absolute;top:10483;left:476"><nobr>vector speedup is not larger given the wide vector widths.</nobr></div>
+<div style="position:absolute;top:10498;left:493"><nobr>Figure 15 shows the speedup of the configurations at 1 to 57</nobr></div>
+<div style="position:absolute;top:10513;left:476"><nobr>threads over the optimized C sequential runtime. All of these</nobr></div>
+<div style="position:absolute;top:10528;left:476"><nobr>configuration scale cleanly up to 57 threads. The final measured</nobr></div>
+<div style="position:absolute;top:10543;left:476"><nobr>Haskell Gap is 4.62×.</nobr></div>
+<div style="position:absolute;top:10570;left:476"><nobr>3.2.2 2D Convolution</nobr></div>
+<div style="position:absolute;top:10591;left:476"><nobr>For the 2D convolution benchmark the naive C configuration was</nobr></div>
+<div style="position:absolute;top:10606;left:476"><nobr>compiled for the Xeon Phi, and a version of the ninja code was pro-</nobr></div>
+<div style="position:absolute;top:10621;left:476"><nobr>duced by modifying the implementation used in the original ninja</nobr></div>
+<div style="position:absolute;top:10636;left:476"><nobr>gap paper to measure results on an earlier software development</nobr></div>
+<div style="position:absolute;top:10651;left:476"><nobr>platform sharing the same ISA. Haskell code was compiled with</nobr></div>
+<div style="position:absolute;top:10666;left:476"><nobr>HRC, again with and without vectorization.</nobr></div>
+<div style="position:absolute;top:10680;left:493"><nobr>Figure 16 shows the sequential runtime relative to the C Naive</nobr></div>
+<div style="position:absolute;top:10695;left:476"><nobr>configuration. The ninja C configuration again gets substantial</nobr></div>
+<div style="position:absolute;top:10710;left:476"><nobr>speedups from the wide vector units, running in 12% of the time</nobr></div>
+<div style="position:absolute;top:10725;left:476"><nobr>of the naive C configuration. The Haskell code is roughly at parity</nobr></div>
+<div style="position:absolute;top:10740;left:476"><nobr>with the naive C without vectorization (6% slower), but the addi-</nobr></div>
+<div style="position:absolute;top:10755;left:476"><nobr>tion of vectorization only results in a 21% speedup relative to the</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:10802;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:10802;left:445"><nobr>9</nobr></div>
+<div style="position:absolute;top:10802;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:10867;left:0"><hr></div><font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:11097;left:155"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:11116;left:225"><nobr>0.29</nobr></div>
+<div style="position:absolute;top:10992;left:295"><nobr>4.75</nobr></div>
+<div style="position:absolute;top:11086;left:366"><nobr>1.40</nobr></div>
+<div style="position:absolute;top:11132;left:116"><nobr>0</nobr></div>
+<div style="position:absolute;top:11119;left:109"><nobr>0.5</nobr></div>
+<div style="position:absolute;top:11105;left:116"><nobr>1</nobr></div>
+<div style="position:absolute;top:11091;left:109"><nobr>1.5</nobr></div>
+<div style="position:absolute;top:11077;left:116"><nobr>2</nobr></div>
+<div style="position:absolute;top:11063;left:109"><nobr>2.5</nobr></div>
+<div style="position:absolute;top:11049;left:116"><nobr>3</nobr></div>
+<div style="position:absolute;top:11035;left:109"><nobr>3.5</nobr></div>
+<div style="position:absolute;top:11021;left:116"><nobr>4</nobr></div>
+<div style="position:absolute;top:11007;left:109"><nobr>4.5</nobr></div>
+<div style="position:absolute;top:10994;left:116"><nobr>5</nobr></div>
+<div style="position:absolute;top:11143;left:150"><nobr>Naīve C</nobr></div>
+<div style="position:absolute;top:11143;left:223"><nobr>Opt C</nobr></div>
+<div style="position:absolute;top:11143;left:296"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:11143;left:356"><nobr>HRC SIMD</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:11178;left:81"><nobr>Figure 14. 1D convolution Xeon Phi run time normalized to C</nobr></div>
+<div style="position:absolute;top:11193;left:81"><nobr>Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:11379;left:114"><nobr>0</nobr></div>
+<div style="position:absolute;top:11365;left:114"><nobr>5</nobr></div>
+<div style="position:absolute;top:11351;left:109"><nobr>10</nobr></div>
+<div style="position:absolute;top:11337;left:109"><nobr>15</nobr></div>
+<div style="position:absolute;top:11323;left:109"><nobr>20</nobr></div>
+<div style="position:absolute;top:11309;left:109"><nobr>25</nobr></div>
+<div style="position:absolute;top:11295;left:109"><nobr>30</nobr></div>
+<div style="position:absolute;top:11281;left:109"><nobr>35</nobr></div>
+<div style="position:absolute;top:11267;left:109"><nobr>40</nobr></div>
+<div style="position:absolute;top:11253;left:109"><nobr>45</nobr></div>
+<div style="position:absolute;top:11240;left:109"><nobr>50</nobr></div>
+<div style="position:absolute;top:11389;left:123"><nobr>0</nobr></div>
+<div style="position:absolute;top:11389;left:157"><nobr>10</nobr></div>
+<div style="position:absolute;top:11389;left:193"><nobr>20</nobr></div>
+<div style="position:absolute;top:11389;left:229"><nobr>30</nobr></div>
+<div style="position:absolute;top:11389;left:265"><nobr>40</nobr></div>
+<div style="position:absolute;top:11389;left:301"><nobr>50</nobr></div>
+<div style="position:absolute;top:11389;left:337"><nobr>60</nobr></div>
+<div style="position:absolute;top:11293;left:375"><nobr>Naīve C</nobr></div>
+<div style="position:absolute;top:11307;left:375"><nobr>Opt C</nobr></div>
+<div style="position:absolute;top:11322;left:375"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:11337;left:375"><nobr>HRC SIMD</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:11424;left:81"><nobr>Figure 15. 1D convolution Xeon Phi speedup relative to best se-</nobr></div>
+<div style="position:absolute;top:11439;left:81"><nobr>quential</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:11503;left:155"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:11605;left:225"><nobr>0.12</nobr></div>
+<div style="position:absolute;top:11496;left:295"><nobr>1.06</nobr></div>
+<div style="position:absolute;top:11528;left:365"><nobr>0.79</nobr></div>
+<div style="position:absolute;top:11627;left:116"><nobr>0</nobr></div>
+<div style="position:absolute;top:11604;left:109"><nobr>0.2</nobr></div>
+<div style="position:absolute;top:11581;left:109"><nobr>0.4</nobr></div>
+<div style="position:absolute;top:11558;left:109"><nobr>0.6</nobr></div>
+<div style="position:absolute;top:11535;left:109"><nobr>0.8</nobr></div>
+<div style="position:absolute;top:11511;left:116"><nobr>1</nobr></div>
+<div style="position:absolute;top:11488;left:109"><nobr>1.2</nobr></div>
+<div style="position:absolute;top:11638;left:150"><nobr>Naīve C</nobr></div>
+<div style="position:absolute;top:11638;left:221"><nobr>Ninja C</nobr></div>
+<div style="position:absolute;top:11638;left:296"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:11638;left:356"><nobr>HRC SIMD</nobr></div>
+<div style="position:absolute;top:11651;left:355"><nobr>16</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:11673;left:81"><nobr>Figure 16. 2D convolution Xeon Phi run time normalized to C</nobr></div>
+<div style="position:absolute;top:11688;left:81"><nobr>Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:11721;left:111"><nobr>HRC SIMD</nobr></div>
+<div style="position:absolute;top:11873;left:114"><nobr>0</nobr></div>
+<div style="position:absolute;top:11856;left:114"><nobr>2</nobr></div>
+<div style="position:absolute;top:11838;left:114"><nobr>4</nobr></div>
+<div style="position:absolute;top:11821;left:114"><nobr>6</nobr></div>
+<div style="position:absolute;top:11804;left:114"><nobr>8</nobr></div>
+<div style="position:absolute;top:11786;left:109"><nobr>10</nobr></div>
+<div style="position:absolute;top:11769;left:109"><nobr>12</nobr></div>
+<div style="position:absolute;top:11752;left:109"><nobr>14</nobr></div>
+<div style="position:absolute;top:11734;left:109"><nobr>16</nobr></div>
+<div style="position:absolute;top:11884;left:123"><nobr>0</nobr></div>
+<div style="position:absolute;top:11884;left:157"><nobr>10</nobr></div>
+<div style="position:absolute;top:11884;left:193"><nobr>20</nobr></div>
+<div style="position:absolute;top:11884;left:229"><nobr>30</nobr></div>
+<div style="position:absolute;top:11884;left:265"><nobr>40</nobr></div>
+<div style="position:absolute;top:11884;left:301"><nobr>50</nobr></div>
+<div style="position:absolute;top:11884;left:337"><nobr>60</nobr></div>
+<div style="position:absolute;top:11787;left:375"><nobr>Naīve C</nobr></div>
+<div style="position:absolute;top:11802;left:375"><nobr>Ninja C</nobr></div>
+<div style="position:absolute;top:11817;left:375"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:11831;left:375"><nobr>HRC SIMD</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:11919;left:81"><nobr>Figure 17. 2D convolution Xeon Phi speedup relative to best se-</nobr></div>
+<div style="position:absolute;top:11934;left:81"><nobr>quential</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:11002;left:561"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:11074;left:655"><nobr>0.38</nobr></div>
+<div style="position:absolute;top:11007;left:748"><nobr>0.96</nobr></div>
+<div style="position:absolute;top:11126;left:510"><nobr>0</nobr></div>
+<div style="position:absolute;top:11103;left:504"><nobr>0.2</nobr></div>
+<div style="position:absolute;top:11080;left:504"><nobr>0.4</nobr></div>
+<div style="position:absolute;top:11057;left:504"><nobr>0.6</nobr></div>
+<div style="position:absolute;top:11033;left:504"><nobr>0.8</nobr></div>
+<div style="position:absolute;top:11010;left:510"><nobr>1</nobr></div>
+<div style="position:absolute;top:10987;left:504"><nobr>1.2</nobr></div>
+<div style="position:absolute;top:11137;left:556"><nobr>Naīve C</nobr></div>
+<div style="position:absolute;top:11137;left:653"><nobr>Opt C</nobr></div>
+<div style="position:absolute;top:11137;left:749"><nobr>HRC</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:11172;left:476"><nobr>Figure 18. Black Scholes Xeon Phi run time normalized to C</nobr></div>
+<div style="position:absolute;top:11187;left:476"><nobr>Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:11380;left:508"><nobr>0</nobr></div>
+<div style="position:absolute;top:11365;left:508"><nobr>2</nobr></div>
+<div style="position:absolute;top:11349;left:508"><nobr>4</nobr></div>
+<div style="position:absolute;top:11334;left:508"><nobr>6</nobr></div>
+<div style="position:absolute;top:11318;left:508"><nobr>8</nobr></div>
+<div style="position:absolute;top:11303;left:504"><nobr>10</nobr></div>
+<div style="position:absolute;top:11287;left:504"><nobr>12</nobr></div>
+<div style="position:absolute;top:11272;left:504"><nobr>14</nobr></div>
+<div style="position:absolute;top:11257;left:504"><nobr>16</nobr></div>
+<div style="position:absolute;top:11241;left:504"><nobr>18</nobr></div>
+<div style="position:absolute;top:11391;left:518"><nobr>0</nobr></div>
+<div style="position:absolute;top:11391;left:553"><nobr>10</nobr></div>
+<div style="position:absolute;top:11391;left:590"><nobr>20</nobr></div>
+<div style="position:absolute;top:11391;left:628"><nobr>30</nobr></div>
+<div style="position:absolute;top:11391;left:665"><nobr>40</nobr></div>
+<div style="position:absolute;top:11391;left:703"><nobr>50</nobr></div>
+<div style="position:absolute;top:11391;left:740"><nobr>60</nobr></div>
+<div style="position:absolute;top:11302;left:778"><nobr>Naīve C</nobr></div>
+<div style="position:absolute;top:11316;left:778"><nobr>Opt C</nobr></div>
+<div style="position:absolute;top:11331;left:778"><nobr>HRC</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:11426;left:476"><nobr>Figure 19. Black Scholes Xeon Phi speedup relative to best se-</nobr></div>
+<div style="position:absolute;top:11441;left:476"><nobr>quential</nobr></div>
+<div style="position:absolute;top:11489;left:476"><nobr>naive C. We have not yet investigated why the speedup is not larger</nobr></div>
+<div style="position:absolute;top:11504;left:476"><nobr>given the wide vector widths.</nobr></div>
+<div style="position:absolute;top:11519;left:493"><nobr>Figure 17 shows the speedup of the configurations at 1 to 57</nobr></div>
+<div style="position:absolute;top:11534;left:476"><nobr>threads over the ninja sequential runtime. The naive C code scales</nobr></div>
+<div style="position:absolute;top:11549;left:476"><nobr>fairly linearly, but the HRC configurations taper off fairly rapidly</nobr></div>
+<div style="position:absolute;top:11563;left:476"><nobr>and fail to scale to larger numbers of processors. The ninja code,</nobr></div>
+<div style="position:absolute;top:11578;left:476"><nobr>while not scaling linearly, continues to scale reasonably well until</nobr></div>
+<div style="position:absolute;top:11593;left:476"><nobr>fairly high core counts. The final Haskell Gap for this benchmark</nobr></div>
+<div style="position:absolute;top:11608;left:476"><nobr>is 9.52×.</nobr></div>
+<div style="position:absolute;top:11638;left:476"><nobr>3.2.3 Black Scholes</nobr></div>
+<div style="position:absolute;top:11659;left:476"><nobr>For the Black Scholes benchmark the naive C and optimized C</nobr></div>
+<div style="position:absolute;top:11674;left:476"><nobr>configurations were compiled for the Xeon Phi, and the Haskell</nobr></div>
+<div style="position:absolute;top:11689;left:476"><nobr>code was compiled with the HRC. No vectorization results are</nobr></div>
+<div style="position:absolute;top:11704;left:476"><nobr>reported for HRC, since we are unable to vectorize the branches</nobr></div>
+<div style="position:absolute;top:11719;left:476"><nobr>in the inner loop at this time.</nobr></div>
+<div style="position:absolute;top:11734;left:493"><nobr>Figure 18 shows the sequential runtime relative to the C Naive</nobr></div>
+<div style="position:absolute;top:11749;left:476"><nobr>configuration. The optimized C configuration runs in 38% of the</nobr></div>
+<div style="position:absolute;top:11764;left:476"><nobr>the time of the naive C version, possibly reflecting the cost of the</nobr></div>
+<div style="position:absolute;top:11779;left:476"><nobr>required masking operations to handle the conditionals internal to</nobr></div>
+<div style="position:absolute;top:11794;left:476"><nobr>the loop. The HRC compiled code is very slightly faster than the</nobr></div>
+<div style="position:absolute;top:11809;left:476"><nobr>naive C code, but substantially slower than the optimized C code.</nobr></div>
+<div style="position:absolute;top:11824;left:493"><nobr>Figure 19 shows the speedup of the configurations at 1 to 57</nobr></div>
+<div style="position:absolute;top:11839;left:476"><nobr>threads over the optimized C sequential runtime. For this bench-</nobr></div>
+<div style="position:absolute;top:11854;left:476"><nobr>mark, the optimized C code scales poorly past 20 processors, with</nobr></div>
+<div style="position:absolute;top:11868;left:476"><nobr>performance dropping off significantly at higher numbers of pro-</nobr></div>
+<div style="position:absolute;top:11883;left:476"><nobr>cessors. Similarly, the naive C code ceases to scale at around 25</nobr></div>
+<div style="position:absolute;top:11898;left:476"><nobr>processors. The Haskell code on the other hand scales very well,</nobr></div>
+<div style="position:absolute;top:11913;left:476"><nobr>with the result that at high numbers of processors the Haskell code</nobr></div>
+<div style="position:absolute;top:11928;left:476"><nobr>edges out the peak performance of the optimized C code. This re-</nobr></div>
+<div style="position:absolute;top:11943;left:476"><nobr>sults in the only example in these benchmarks of a Haskell Gap less</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:11990;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:11990;left:442"><nobr>10</nobr></div>
+<div style="position:absolute;top:11990;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:12055;left:0"><hr></div><font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:12184;left:155"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:12294;left:225"><nobr>0.05</nobr></div>
+<div style="position:absolute;top:12201;left:295"><nobr>0.85</nobr></div>
+<div style="position:absolute;top:12277;left:365"><nobr>0.20</nobr></div>
+<div style="position:absolute;top:12308;left:116"><nobr>0</nobr></div>
+<div style="position:absolute;top:12285;left:109"><nobr>0.2</nobr></div>
+<div style="position:absolute;top:12262;left:109"><nobr>0.4</nobr></div>
+<div style="position:absolute;top:12238;left:109"><nobr>0.6</nobr></div>
+<div style="position:absolute;top:12215;left:109"><nobr>0.8</nobr></div>
+<div style="position:absolute;top:12192;left:116"><nobr>1</nobr></div>
+<div style="position:absolute;top:12168;left:109"><nobr>1.2</nobr></div>
+<div style="position:absolute;top:12319;left:150"><nobr>Naīve C</nobr></div>
+<div style="position:absolute;top:12319;left:223"><nobr>Opt C</nobr></div>
+<div style="position:absolute;top:12319;left:296"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:12319;left:356"><nobr>HRC SIMD</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:12360;left:94"><nobr>Figure 20. N body Xeon Phi run time normalized to C Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:12553;left:114"><nobr>0</nobr></div>
+<div style="position:absolute;top:12538;left:114"><nobr>2</nobr></div>
+<div style="position:absolute;top:12522;left:114"><nobr>4</nobr></div>
+<div style="position:absolute;top:12507;left:114"><nobr>6</nobr></div>
+<div style="position:absolute;top:12491;left:114"><nobr>8</nobr></div>
+<div style="position:absolute;top:12476;left:109"><nobr>10</nobr></div>
+<div style="position:absolute;top:12460;left:109"><nobr>12</nobr></div>
+<div style="position:absolute;top:12445;left:109"><nobr>14</nobr></div>
+<div style="position:absolute;top:12429;left:109"><nobr>16</nobr></div>
+<div style="position:absolute;top:12414;left:109"><nobr>18</nobr></div>
+<div style="position:absolute;top:12563;left:123"><nobr>0</nobr></div>
+<div style="position:absolute;top:12563;left:157"><nobr>10</nobr></div>
+<div style="position:absolute;top:12563;left:193"><nobr>20</nobr></div>
+<div style="position:absolute;top:12563;left:229"><nobr>30</nobr></div>
+<div style="position:absolute;top:12563;left:265"><nobr>40</nobr></div>
+<div style="position:absolute;top:12563;left:301"><nobr>50</nobr></div>
+<div style="position:absolute;top:12563;left:337"><nobr>60</nobr></div>
+<div style="position:absolute;top:12467;left:375"><nobr>Naīve C</nobr></div>
+<div style="position:absolute;top:12482;left:375"><nobr>Opt C</nobr></div>
+<div style="position:absolute;top:12496;left:375"><nobr>HRC</nobr></div>
+<div style="position:absolute;top:12511;left:375"><nobr>HRC SIMD</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:12598;left:86"><nobr>Figure 21. N Body Xeon Phi speedup relative to best sequential</nobr></div>
+<div style="position:absolute;top:12644;left:81"><nobr>than 1×, indicating superior peak performance to best measured C</nobr></div>
+<div style="position:absolute;top:12659;left:81"><nobr>code. The final Haskell Gap for this benchmark is .88×.</nobr></div>
+<div style="position:absolute;top:12687;left:81"><nobr>3.2.4 N Body</nobr></div>
+<div style="position:absolute;top:12708;left:81"><nobr>For the N Body benchmark the naive C, optimized C, and blocked</nobr></div>
+<div style="position:absolute;top:12723;left:81"><nobr>C configurations were compiled for the Xeon Phi, and the Haskell</nobr></div>
+<div style="position:absolute;top:12738;left:81"><nobr>code was compiled with HRC, again with and without vectoriza-</nobr></div>
+<div style="position:absolute;top:12753;left:81"><nobr>tion.</nobr></div>
+<div style="position:absolute;top:12768;left:99"><nobr>Figure 20 shows the sequential runtime relative to the C Naive</nobr></div>
+<div style="position:absolute;top:12783;left:81"><nobr>configuration. The optimized C configuration runs in 5% of the the</nobr></div>
+<div style="position:absolute;top:12798;left:81"><nobr>time of the naive C version—a substantial increase in performance.</nobr></div>
+<div style="position:absolute;top:12813;left:81"><nobr>The blocked version of this code again gives no significant benefits</nobr></div>
+<div style="position:absolute;top:12828;left:81"><nobr>over the unrolled version. Our compiler is able to vectorize this</nobr></div>
+<div style="position:absolute;top:12843;left:81"><nobr>code for reasonably good speedup, albeit not as significant a drop</nobr></div>
+<div style="position:absolute;top:12858;left:81"><nobr>as with the C code.</nobr></div>
+<div style="position:absolute;top:12873;left:99"><nobr>Figure 21 shows the speedup of the configurations at 1 to 57</nobr></div>
+<div style="position:absolute;top:12887;left:81"><nobr>threads over the optimized C sequential runtime. Much as with the</nobr></div>
+<div style="position:absolute;top:12902;left:81"><nobr>Black Scholes code, the optimized C code scales poorly past 27</nobr></div>
+<div style="position:absolute;top:12917;left:81"><nobr>processors, with performance dropping off significantly at higher</nobr></div>
+<div style="position:absolute;top:12932;left:81"><nobr>numbers of processors. The naive C code however scales fairly</nobr></div>
+<div style="position:absolute;top:12947;left:81"><nobr>linearly. The HRC SIMD configuration continues to scale up to</nobr></div>
+<div style="position:absolute;top:12962;left:81"><nobr>57 processors, but with a decreasing slope at higher core counts.</nobr></div>
+<div style="position:absolute;top:12977;left:81"><nobr>Despite the superior scalability at higher core counts, the Haskell</nobr></div>
+<div style="position:absolute;top:12992;left:81"><nobr>code is not able to overcome the sequential performance deficit.</nobr></div>
+<div style="position:absolute;top:13007;left:81"><nobr>The final Haskell Gap for this benchmark is 2.26×.</nobr></div>
+<div style="position:absolute;top:13035;left:81"><nobr>3.2.5 TreeSearch</nobr></div>
+<div style="position:absolute;top:13056;left:81"><nobr>For the TreeSearch benchmark, since we have yet to re-produce a</nobr></div>
+<div style="position:absolute;top:13071;left:81"><nobr>ninja version using the Xeon Phi vector ISA and its naive gather</nobr></div>
+<div style="position:absolute;top:13086;left:81"><nobr>support, we only report the performance for the naive C and opti-</nobr></div>
+<div style="position:absolute;top:13101;left:81"><nobr>mized C compiled for the Xeon Phi. The Haskell program were</nobr></div>
+<div style="position:absolute;top:13116;left:81"><nobr>compiled with HRC. All benchmarks were run with 10 million</nobr></div>
+<div style="position:absolute;top:13131;left:81"><nobr>queries over a binary tree of depth 16.</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:5px;font-family:Times">
+<div style="position:absolute;top:12251;left:548"><nobr>1.00</nobr></div>
+<div style="position:absolute;top:12200;left:619"><nobr>2.04</nobr></div>
+<div style="position:absolute;top:12264;left:690"><nobr>0.72</nobr></div>
+<div style="position:absolute;top:12264;left:761"><nobr>0.73</nobr></div>
+<div style="position:absolute;top:12307;left:509"><nobr>0</nobr></div>
+<div style="position:absolute;top:12282;left:503"><nobr>0.5</nobr></div>
+<div style="position:absolute;top:12258;left:509"><nobr>1</nobr></div>
+<div style="position:absolute;top:12233;left:503"><nobr>1.5</nobr></div>
+<div style="position:absolute;top:12209;left:509"><nobr>2</nobr></div>
+<div style="position:absolute;top:12184;left:503"><nobr>2.5</nobr></div>
+<div style="position:absolute;top:12316;left:544"><nobr>Naīve C</nobr></div>
+<div style="position:absolute;top:12316;left:617"><nobr>Opt C</nobr></div>
+<div style="position:absolute;top:12316;left:686"><nobr>Fixed C</nobr></div>
+<div style="position:absolute;top:12316;left:762"><nobr>HRC</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:12360;left:478"><nobr>Figure 22. TreeSearch Xeon Phi run time normalized to C Naive</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:12562;left:508"><nobr>0</nobr></div>
+<div style="position:absolute;top:12534;left:508"><nobr>5</nobr></div>
+<div style="position:absolute;top:12506;left:504"><nobr>10</nobr></div>
+<div style="position:absolute;top:12478;left:504"><nobr>15</nobr></div>
+<div style="position:absolute;top:12451;left:504"><nobr>20</nobr></div>
+<div style="position:absolute;top:12423;left:504"><nobr>25</nobr></div>
+<div style="position:absolute;top:12572;left:518"><nobr>0</nobr></div>
+<div style="position:absolute;top:12572;left:553"><nobr>10</nobr></div>
+<div style="position:absolute;top:12572;left:590"><nobr>20</nobr></div>
+<div style="position:absolute;top:12572;left:628"><nobr>30</nobr></div>
+<div style="position:absolute;top:12572;left:665"><nobr>40</nobr></div>
+<div style="position:absolute;top:12572;left:703"><nobr>50</nobr></div>
+<div style="position:absolute;top:12572;left:740"><nobr>60</nobr></div>
+<div style="position:absolute;top:12476;left:778"><nobr>Naīve C</nobr></div>
+<div style="position:absolute;top:12491;left:778"><nobr>Opt C</nobr></div>
+<div style="position:absolute;top:12505;left:778"><nobr>Fixed C</nobr></div>
+<div style="position:absolute;top:12520;left:778"><nobr>HRC</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:12607;left:476"><nobr>Figure 23. TreeSearch Xeon Phi speedup relative to best sequen-</nobr></div>
+<div style="position:absolute;top:12622;left:476"><nobr>tial</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:6px;font-family:Times">
+<div style="position:absolute;top:12738;left:538"><nobr>4.62</nobr></div>
+<div style="position:absolute;top:12675;left:588"><nobr>9.52</nobr></div>
+<div style="position:absolute;top:12787;left:638"><nobr>0.88</nobr></div>
+<div style="position:absolute;top:12769;left:688"><nobr>2.26</nobr></div>
+<div style="position:absolute;top:12777;left:738"><nobr>1.65</nobr></div>
+<div style="position:absolute;top:12806;left:508"><nobr>0</nobr></div>
+<div style="position:absolute;top:12793;left:508"><nobr>1</nobr></div>
+<div style="position:absolute;top:12780;left:508"><nobr>2</nobr></div>
+<div style="position:absolute;top:12767;left:508"><nobr>3</nobr></div>
+<div style="position:absolute;top:12754;left:508"><nobr>4</nobr></div>
+<div style="position:absolute;top:12741;left:508"><nobr>5</nobr></div>
+<div style="position:absolute;top:12728;left:508"><nobr>6</nobr></div>
+<div style="position:absolute;top:12715;left:508"><nobr>7</nobr></div>
+<div style="position:absolute;top:12703;left:508"><nobr>8</nobr></div>
+<div style="position:absolute;top:12690;left:508"><nobr>9</nobr></div>
+<div style="position:absolute;top:12677;left:504"><nobr>10</nobr></div>
+<div style="position:absolute;top:12817;left:540"><nobr>1D</nobr></div>
+<div style="position:absolute;top:12827;left:525"><nobr>Convolution</nobr></div>
+<div style="position:absolute;top:12817;left:590"><nobr>2D</nobr></div>
+<div style="position:absolute;top:12827;left:575"><nobr>Convolution</nobr></div>
+<div style="position:absolute;top:12817;left:623"><nobr>Black Scholes</nobr></div>
+<div style="position:absolute;top:12817;left:683"><nobr>N Body</nobr></div>
+<div style="position:absolute;top:12817;left:726"><nobr>Tree Search</nobr></div>
+<div style="position:absolute;top:12752;left:789"><nobr>HRC</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:12868;left:542"><nobr>Figure 24. The Haskell Gap on Xeon Phi</nobr></div>
+<div style="position:absolute;top:12922;left:493"><nobr>The relative sequential performance for these configurations is</nobr></div>
+<div style="position:absolute;top:12937;left:476"><nobr>given in Figure 22. Again, we observe poor performance with the</nobr></div>
+<div style="position:absolute;top:12952;left:476"><nobr>standard optimized C code. The C code optimized for a depth 16</nobr></div>
+<div style="position:absolute;top:12967;left:476"><nobr>tree (Fixed C) is 28% faster than the naive C, and HRC compiled</nobr></div>
+<div style="position:absolute;top:12982;left:476"><nobr>Haskell version is about 27% faster than naive C. One important</nobr></div>
+<div style="position:absolute;top:12997;left:476"><nobr>difference for our code generation is that both C versions, despite</nobr></div>
+<div style="position:absolute;top:13012;left:476"><nobr>being compiled for 64-bit Xeon Phi platform, still use a 32-bit int</nobr></div>
+<div style="position:absolute;top:13027;left:476"><nobr>type as array index, while the Haskell version uses 64-bit int.</nobr></div>
+<div style="position:absolute;top:13042;left:493"><nobr>Figure 23 shows the speedup of all the configurations relative</nobr></div>
+<div style="position:absolute;top:13056;left:476"><nobr>to the optimized C sequential runtime. The optimized C scales lin-</nobr></div>
+<div style="position:absolute;top:13071;left:476"><nobr>early at first, but suffers from a slowdown at around 30 threads, and</nobr></div>
+<div style="position:absolute;top:13086;left:476"><nobr>scales negatively beyond it. The naive C surpasses HRC perfor-</nobr></div>
+<div style="position:absolute;top:13101;left:476"><nobr>mance at about 16 threads, and also scales poorly afer 40 threads.</nobr></div>
+<div style="position:absolute;top:13116;left:476"><nobr>The HRC version stops scaling beyond 20 cores. The final mea-</nobr></div>
+<div style="position:absolute;top:13131;left:476"><nobr>sured Haskell Gap for this benchmark is 1.65×.</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:13178;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:13178;left:442"><nobr>11</nobr></div>
+<div style="position:absolute;top:13178;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+<div style="position:absolute;top:13243;left:0"><hr></div><font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:13354;left:81"><nobr>3.2.6 The Xeon Phi Haskell Gap</nobr></div>
+<div style="position:absolute;top:13375;left:81"><nobr>Figure 13 summarizes the Haskell Gap on Xeon Phi for the subset</nobr></div>
+<div style="position:absolute;top:13390;left:81"><nobr>of the benchmarks ported to that architecture. We are greatly en-</nobr></div>
+<div style="position:absolute;top:13405;left:81"><nobr>couraged to achieve an overall improvement in peak performance</nobr></div>
+<div style="position:absolute;top:13420;left:81"><nobr>over the best C version on Black Scholes. Our performance on the</nobr></div>
+<div style="position:absolute;top:13435;left:81"><nobr>1D convolution, and 2D convolution, benchmarks are disappoint-</nobr></div>
+<div style="position:absolute;top:13449;left:81"><nobr>ing when compared to our performance on the CPU. This almost</nobr></div>
+<div style="position:absolute;top:13464;left:81"><nobr>certainly reflects the preliminary nature of our vectorization sup-</nobr></div>
+<div style="position:absolute;top:13479;left:81"><nobr>port on this architecture, and in particular some new issues to be</nobr></div>
+<div style="position:absolute;top:13494;left:81"><nobr>resolved in dealing with a 64 bit architecture.</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:14px;font-family:Times">
+<div style="position:absolute;top:13532;left:81"><nobr>4. Conclusions</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:13556;left:81"><nobr>We strongly believe that empirical performance comparisons to C</nobr></div>
+<div style="position:absolute;top:13571;left:81"><nobr>and other high-performance languages serve as a valuable refer-</nobr></div>
+<div style="position:absolute;top:13585;left:81"><nobr>ence point and sanity check for work on optimizing functional lan-</nobr></div>
+<div style="position:absolute;top:13600;left:81"><nobr>guages in general, and Haskell in particular. However, we hope that</nobr></div>
+<div style="position:absolute;top:13615;left:81"><nobr>this paper makes the point that such comparisons are extremely dif-</nobr></div>
+<div style="position:absolute;top:13630;left:81"><nobr>ficult to do well. There are always, at some point, judgment calls</nobr></div>
+<div style="position:absolute;top:13645;left:81"><nobr>to be made—among them the crucial questions “What C?”, and</nobr></div>
+<div style="position:absolute;top:13660;left:81"><nobr>“What C compiler?”. A benefit of programming in C is that there</nobr></div>
+<div style="position:absolute;top:13675;left:81"><nobr>are substantial opportunities for hand-optimization - as we show</nobr></div>
+<div style="position:absolute;top:13690;left:81"><nobr>in this paper, relatively simple code transformations can make dra-</nobr></div>
+<div style="position:absolute;top:13705;left:81"><nobr>matic changes in performance. Therefore, exactly what C code is</nobr></div>
+<div style="position:absolute;top:13720;left:81"><nobr>compared to is critical. Similarly, the choice of C compiler and the</nobr></div>
+<div style="position:absolute;top:13735;left:81"><nobr>options passed to it can significantly change the result of the com-</nobr></div>
+<div style="position:absolute;top:13750;left:81"><nobr>parison. Finally, there is always the question of what is “fair” to use</nobr></div>
+<div style="position:absolute;top:13765;left:81"><nobr>in the C code. Is the use of pragmas to induce vectorization where</nobr></div>
+<div style="position:absolute;top:13780;left:81"><nobr>the compiler otherwise would not “fair”? What about intrinsics?</nobr></div>
+<div style="position:absolute;top:13795;left:81"><nobr>What about inline assembly code? To what extent should we allow</nobr></div>
+<div style="position:absolute;top:13810;left:81"><nobr>the C compiler to re-arrange floating point computations in ways</nobr></div>
+<div style="position:absolute;top:13825;left:81"><nobr>that may change the precision of the computed result?</nobr></div>
+<div style="position:absolute;top:13840;left:99"><nobr>And on the other side of the equation, what Haskell code should</nobr></div>
+<div style="position:absolute;top:13854;left:81"><nobr>be used for a comparison? One can, with sufficient effort, essen-</nobr></div>
+<div style="position:absolute;top:13869;left:81"><nobr>tially write C code in Haskell using various unsafe primitives. We</nobr></div>
+<div style="position:absolute;top:13884;left:81"><nobr>would argue that this is not true to the spirit and goals of Haskell,</nobr></div>
+<div style="position:absolute;top:13899;left:81"><nobr>and we have attempted in this paper to remain within the space</nobr></div>
+<div style="position:absolute;top:13914;left:81"><nobr>of “reasonably idiomatic” Haskell. However, we have made abun-</nobr></div>
+<div style="position:absolute;top:13929;left:81"><nobr>dant use of strictness annotations, explicit strictness, and unboxed</nobr></div>
+<div style="position:absolute;top:13944;left:81"><nobr>vectors. We have, more controversially perhaps, used unsafe array</nobr></div>
+<div style="position:absolute;top:13959;left:81"><nobr>subscripting in places. Are our choices reasonable?</nobr></div>
+<div style="position:absolute;top:13974;left:99"><nobr>We do not believe that there are definitive answers to these</nobr></div>
+<div style="position:absolute;top:13989;left:81"><nobr>questions. We have tried, in this paper, to explore very carefully</nobr></div>
+<div style="position:absolute;top:14004;left:81"><nobr>a space of answers to these questions that we feel is reasonable.</nobr></div>
+<div style="position:absolute;top:14019;left:81"><nobr>We have shown that for our notion of “reasonable” Haskell, using</nobr></div>
+<div style="position:absolute;top:14034;left:81"><nobr>the compiler technology we have developed, there are reasonable</nobr></div>
+<div style="position:absolute;top:14049;left:81"><nobr>C programs which are significantly out-performed by our reason-</nobr></div>
+<div style="position:absolute;top:14064;left:81"><nobr>able Haskell programs; and that there are other, equally reasonable</nobr></div>
+<div style="position:absolute;top:14079;left:81"><nobr>C programs which in turn significantly out-perform our reasonable</nobr></div>
+<div style="position:absolute;top:14094;left:81"><nobr>Haskell. We have also tried, as best as possible, to leverage pre-</nobr></div>
+<div style="position:absolute;top:14109;left:81"><nobr>vious work [9] to situate our choices of “reasonable” programs</nobr></div>
+<div style="position:absolute;top:14123;left:81"><nobr>relative to the best published algorithms. We hope that this work</nobr></div>
+<div style="position:absolute;top:14138;left:81"><nobr>provides a valuable set of data points for programmers and imple-</nobr></div>
+<div style="position:absolute;top:14153;left:81"><nobr>menters wishing to understand better how certain classes of Haskell</nobr></div>
+<div style="position:absolute;top:14168;left:81"><nobr>programs stack up against “equivalent” C programs. We also hope</nobr></div>
+<div style="position:absolute;top:14183;left:81"><nobr>that this work encourages a practice of taking comparisons seri-</nobr></div>
+<div style="position:absolute;top:14198;left:81"><nobr>ously, and presenting them transparently, with the understanding</nobr></div>
+<div style="position:absolute;top:14213;left:81"><nobr>that every such comparison inevitably relies on making choices and</nobr></div>
+<div style="position:absolute;top:14228;left:81"><nobr>is hence only meaningful insofar as those choices can be seen and</nobr></div>
+<div style="position:absolute;top:14243;left:81"><nobr>understood by the reader.</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:14px;font-family:Times">
+<div style="position:absolute;top:14281;left:81"><nobr>Acknowledgments</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:11px;font-family:Times">
+<div style="position:absolute;top:14304;left:81"><nobr>We are grateful to the authors of the ninja gap paper [9] for provid-</nobr></div>
+<div style="position:absolute;top:14319;left:81"><nobr>ing us with access to their source code, answering our questions,</nobr></div>
+<div style="position:absolute;top:13354;left:476"><nobr>and most of all for providing the inspiration for this work with their</nobr></div>
+<div style="position:absolute;top:13369;left:476"><nobr>careful analysis.</nobr></div>
+</span></font>
+<font size="3" face="Times"><span style="font-size:14px;font-family:Times">
+<div style="position:absolute;top:13401;left:476"><nobr>References</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:9px;font-family:Times">
+<div style="position:absolute;top:13424;left:476"><nobr>[1] T. A. Anderson, N. Glew, P. Guo, B. T. Lewis, W. Liu, Z. Liu, L. Pe-</nobr></div>
+<div style="position:absolute;top:13437;left:495"><nobr>tersen, M. Rajagopalan, J. M. Stichnoth, G. Wu, and D. Zhang. Pillar:</nobr></div>
+<div style="position:absolute;top:13450;left:495"><nobr>A parallel implementation language. In LCPC, pages 141–155, 2007.</nobr></div>
+<div style="position:absolute;top:13468;left:476"><nobr>[2] G. Keller, M. M. Chakravarty, R. Leshchinskiy, S. Peyton Jones, and</nobr></div>
+<div style="position:absolute;top:13482;left:495"><nobr>B. Lippmeier. Regular, shape-polymorphic, parallel arrays in Haskell.</nobr></div>
+<div style="position:absolute;top:13495;left:495"><nobr>In Proceedings of the 15th ACM SIGPLAN international conference on</nobr></div>
+<div style="position:absolute;top:13509;left:495"><nobr>Functional programming, ICFP ’10, pages 261–272, New York, NY,</nobr></div>
+<div style="position:absolute;top:13522;left:495"><nobr>USA, 2010. ACM. ISBN 978-1-60558-794-3.</nobr></div>
+<div style="position:absolute;top:13540;left:476"><nobr>[3] C. Kim, J. Chhugani, N. Satish, E. Sedlar, A. D. Nguyen, T. Kaldewey,</nobr></div>
+<div style="position:absolute;top:13554;left:495"><nobr>V. W. Lee, S. A. Brandt, and P. Dubey. Fast: fast architecture sensi-</nobr></div>
+<div style="position:absolute;top:13567;left:495"><nobr>tive tree search on modern CPUs and GPUs. In Proceedings of the</nobr></div>
+<div style="position:absolute;top:13581;left:495"><nobr>2010 ACM SIGMOD International Conference on Management of data,</nobr></div>
+<div style="position:absolute;top:13594;left:495"><nobr>pages 339–350. ACM, 2010.</nobr></div>
+<div style="position:absolute;top:13612;left:476"><nobr>[4] B. Lippmeier and G. Keller. Efficient parallel stencil convolution in</nobr></div>
+<div style="position:absolute;top:13625;left:495"><nobr>Haskell. In Proceedings of the 4th ACM symposium on Haskell, Haskell</nobr></div>
+<div style="position:absolute;top:13639;left:495"><nobr>’11, pages 59–70, New York, NY, USA, 2011. ACM. ISBN 978-1-</nobr></div>
+<div style="position:absolute;top:13652;left:495"><nobr>4503-0860-1.</nobr></div>
+<div style="position:absolute;top:13670;left:476"><nobr>[5] B. Lippmeier, M. Chakravarty, G. Keller, and S. Peyton Jones. Guiding</nobr></div>
+<div style="position:absolute;top:13684;left:495"><nobr>parallel array fusion with indexed types. In Proceedings of the 2012</nobr></div>
+<div style="position:absolute;top:13697;left:495"><nobr>symposium on Haskell symposium, Haskell ’12, pages 25–36, New</nobr></div>
+<div style="position:absolute;top:13711;left:495"><nobr>York, NY, USA, 2012. ACM. ISBN 978-1-4503-1574-6.</nobr></div>
+<div style="position:absolute;top:13728;left:476"><nobr>[6] H. Liu, N. Glew, L. Petersen, and T. Anderson. The Intel Labs Haskell</nobr></div>
+<div style="position:absolute;top:13742;left:495"><nobr>research compiler. Submitted for publication, June 2013.</nobr></div>
+<div style="position:absolute;top:13760;left:476"><nobr>[7] L. Petersen and N. Glew. GC-safe interprocedural unboxing. In Pro-</nobr></div>
+<div style="position:absolute;top:13773;left:495"><nobr>ceedings of the 21st international conference on Compiler Construc-</nobr></div>
+<div style="position:absolute;top:13787;left:495"><nobr>tion, CC’12, pages 165–184, Berlin, Heidelberg, 2012. Springer-Verlag.</nobr></div>
+<div style="position:absolute;top:13805;left:476"><nobr>[8] L. Petersen, D. Orchard, and N. Glew. Automatic SIMD vectorization</nobr></div>
+<div style="position:absolute;top:13818;left:495"><nobr>for Haskell. Submitted for publication, April 2013.</nobr></div>
+<div style="position:absolute;top:13836;left:476"><nobr>[9] N. Satish, C. Kim, J. Chhugani, H. Saito, R. Krishnaiyer, M. Smelyan-</nobr></div>
+<div style="position:absolute;top:13849;left:495"><nobr>skiy, M. Girkar, and P. Dubey. Can traditional programming bridge the</nobr></div>
+<div style="position:absolute;top:13863;left:495"><nobr>ninja performance gap for parallel computing applications? In Proceed-</nobr></div>
+<div style="position:absolute;top:13877;left:495"><nobr>ings of the 39th Annual International Symposium on Computer Archi-</nobr></div>
+<div style="position:absolute;top:13890;left:495"><nobr>tecture, ISCA ’12, pages 440–451, Washington, DC, USA, 2012. IEEE</nobr></div>
+<div style="position:absolute;top:13903;left:495"><nobr>Computer Society. ISBN 978-1-4503-1642-2.</nobr></div>
+</span></font>
+<font size="2" face="Times"><span style="font-size:8px;font-family:Times">
+<div style="position:absolute;top:14366;left:81"><nobr>Draft</nobr></div>
+<div style="position:absolute;top:14366;left:442"><nobr>12</nobr></div>
+<div style="position:absolute;top:14366;left:792"><nobr>2013/7/31</nobr></div>
+</span></font>
+
+
+</div></body></html>
